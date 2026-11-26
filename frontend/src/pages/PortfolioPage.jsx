@@ -16,20 +16,114 @@ import {
   Trash2,
   RotateCcw,
   ExternalLink,
+  AlertCircle,
 } from 'lucide-react';
+
+function validateSocialUrl(rawValue, kind) {
+  const value = (rawValue || '').trim();
+  if (!value) {
+    return { valid: true, normalized: '' };
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return {
+      valid: false,
+      error: 'Enter a valid URL starting with https:// or http://',
+    };
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return {
+      valid: false,
+      error: 'URL must start with https:// or http://',
+    };
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  if (!host || (!host.includes('.') && host !== 'localhost')) {
+    return {
+      valid: false,
+      error: 'Enter a complete URL with a valid domain name (e.g. https://example.com)',
+    };
+  }
+
+  if (kind === 'github' && host !== 'github.com' && !host.endsWith('.github.com')) {
+    return {
+      valid: false,
+      error: 'Enter a valid GitHub URL (e.g. https://github.com/yourusername)',
+    };
+  }
+
+  if (kind === 'linkedin' && host !== 'linkedin.com' && !host.endsWith('.linkedin.com')) {
+    return {
+      valid: false,
+      error: 'Enter a valid LinkedIn URL (e.g. https://linkedin.com/in/yourusername)',
+    };
+  }
+
+  return { valid: true, normalized: value };
+}
+
+function isSafeExternalUrl(rawValue) {
+  const value = (rawValue || '').trim();
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
 
 export default function PortfolioPage({ portfolio, onSavePortfolio, onResetPortfolio }) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(portfolio);
+  const [socialErrors, setSocialErrors] = useState({});
 
   const startEdit = () => {
-    setDraft(JSON.parse(JSON.stringify(portfolio)));
+    const copy = JSON.parse(JSON.stringify(portfolio));
+    copy.socials = {
+      github: copy.socials?.github || '',
+      linkedin: copy.socials?.linkedin || '',
+      website: copy.socials?.website || '',
+    };
+    setDraft(copy);
+    setSocialErrors({});
     setIsEditing(true);
   };
 
   const handleSave = (e) => {
     e.preventDefault();
-    onSavePortfolio(draft);
+    const checks = {
+      github: validateSocialUrl(draft.socials?.github, 'github'),
+      linkedin: validateSocialUrl(draft.socials?.linkedin, 'linkedin'),
+      website: validateSocialUrl(draft.socials?.website, 'website'),
+    };
+
+    const nextErrors = {};
+    for (const key of ['github', 'linkedin', 'website']) {
+      if (!checks[key].valid) {
+        nextErrors[key] = checks[key].error;
+      }
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setSocialErrors(nextErrors);
+      return;
+    }
+
+    setSocialErrors({});
+    onSavePortfolio({
+      ...draft,
+      socials: {
+        github: checks.github.normalized,
+        linkedin: checks.linkedin.normalized,
+        website: checks.website.normalized,
+      },
+    });
     setIsEditing(false);
   };
 
@@ -199,43 +293,154 @@ export default function PortfolioPage({ portfolio, onSavePortfolio, onResetPortf
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                GitHub URL
+              <label
+                htmlFor="portfolio-github-url"
+                className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1"
+              >
+                GitHub Profile URL (optional)
               </label>
-              <input
-                type="url"
-                value={draft.socials.github}
-                onChange={(e) =>
-                  setDraft({ ...draft, socials: { ...draft.socials, github: e.target.value } })
-                }
-                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-navy-800 px-3.5 py-2 text-sm"
-              />
+              <div className="relative">
+                <input
+                  id="portfolio-github-url"
+                  type="text"
+                  inputMode="url"
+                  placeholder="https://github.com/yourusername"
+                  value={draft.socials?.github || ''}
+                  onChange={(e) => {
+                    setDraft({
+                      ...draft,
+                      socials: { ...draft.socials, github: e.target.value },
+                    });
+                    if (socialErrors.github) {
+                      setSocialErrors((prev) => ({ ...prev, github: '' }));
+                    }
+                  }}
+                  className={`w-full rounded-xl border bg-slate-50 dark:bg-navy-800 px-3.5 py-2 pr-8 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 ${
+                    socialErrors.github
+                      ? 'border-rose-500 focus:ring-rose-500'
+                      : 'border-slate-200 dark:border-slate-700 focus:ring-indigo-500'
+                  }`}
+                />
+                {draft.socials?.github && (
+                  <button
+                    type="button"
+                    aria-label="Remove GitHub URL"
+                    onClick={() => {
+                      setDraft({ ...draft, socials: { ...draft.socials, github: '' } });
+                      setSocialErrors((prev) => ({ ...prev, github: '' }));
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-rose-500"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              {socialErrors.github && (
+                <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-rose-500">
+                  <AlertCircle className="h-3 w-3 shrink-0" />
+                  <span>{socialErrors.github}</span>
+                </p>
+              )}
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                LinkedIn URL
+              <label
+                htmlFor="portfolio-linkedin-url"
+                className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1"
+              >
+                LinkedIn Profile URL (optional)
               </label>
-              <input
-                type="url"
-                value={draft.socials.linkedin}
-                onChange={(e) =>
-                  setDraft({ ...draft, socials: { ...draft.socials, linkedin: e.target.value } })
-                }
-                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-navy-800 px-3.5 py-2 text-sm"
-              />
+              <div className="relative">
+                <input
+                  id="portfolio-linkedin-url"
+                  type="text"
+                  inputMode="url"
+                  placeholder="https://linkedin.com/in/yourusername"
+                  value={draft.socials?.linkedin || ''}
+                  onChange={(e) => {
+                    setDraft({
+                      ...draft,
+                      socials: { ...draft.socials, linkedin: e.target.value },
+                    });
+                    if (socialErrors.linkedin) {
+                      setSocialErrors((prev) => ({ ...prev, linkedin: '' }));
+                    }
+                  }}
+                  className={`w-full rounded-xl border bg-slate-50 dark:bg-navy-800 px-3.5 py-2 pr-8 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 ${
+                    socialErrors.linkedin
+                      ? 'border-rose-500 focus:ring-rose-500'
+                      : 'border-slate-200 dark:border-slate-700 focus:ring-indigo-500'
+                  }`}
+                />
+                {draft.socials?.linkedin && (
+                  <button
+                    type="button"
+                    aria-label="Remove LinkedIn URL"
+                    onClick={() => {
+                      setDraft({ ...draft, socials: { ...draft.socials, linkedin: '' } });
+                      setSocialErrors((prev) => ({ ...prev, linkedin: '' }));
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-rose-500"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              {socialErrors.linkedin && (
+                <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-rose-500">
+                  <AlertCircle className="h-3 w-3 shrink-0" />
+                  <span>{socialErrors.linkedin}</span>
+                </p>
+              )}
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                Personal Website
+              <label
+                htmlFor="portfolio-website-url"
+                className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1"
+              >
+                Personal Website URL (optional)
               </label>
-              <input
-                type="url"
-                value={draft.socials.website}
-                onChange={(e) =>
-                  setDraft({ ...draft, socials: { ...draft.socials, website: e.target.value } })
-                }
-                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-navy-800 px-3.5 py-2 text-sm"
-              />
+              <div className="relative">
+                <input
+                  id="portfolio-website-url"
+                  type="text"
+                  inputMode="url"
+                  placeholder="https://yourwebsite.com"
+                  value={draft.socials?.website || ''}
+                  onChange={(e) => {
+                    setDraft({
+                      ...draft,
+                      socials: { ...draft.socials, website: e.target.value },
+                    });
+                    if (socialErrors.website) {
+                      setSocialErrors((prev) => ({ ...prev, website: '' }));
+                    }
+                  }}
+                  className={`w-full rounded-xl border bg-slate-50 dark:bg-navy-800 px-3.5 py-2 pr-8 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 ${
+                    socialErrors.website
+                      ? 'border-rose-500 focus:ring-rose-500'
+                      : 'border-slate-200 dark:border-slate-700 focus:ring-indigo-500'
+                  }`}
+                />
+                {draft.socials?.website && (
+                  <button
+                    type="button"
+                    aria-label="Remove Personal Website URL"
+                    onClick={() => {
+                      setDraft({ ...draft, socials: { ...draft.socials, website: '' } });
+                      setSocialErrors((prev) => ({ ...prev, website: '' }));
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-rose-500"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+              {socialErrors.website && (
+                <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-rose-500">
+                  <AlertCircle className="h-3 w-3 shrink-0" />
+                  <span>{socialErrors.website}</span>
+                </p>
+              )}
             </div>
           </div>
 
@@ -457,7 +662,7 @@ export default function PortfolioPage({ portfolio, onSavePortfolio, onResetPortf
                     tag: 'Web App',
                     description: 'Describe what you built and the problem it solves.',
                     tech: ['React', 'Python'],
-                    link: 'https://github.com',
+                    link: '',
                   })
                 }
                 className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400"
@@ -592,41 +797,45 @@ export default function PortfolioPage({ portfolio, onSavePortfolio, onResetPortf
                 </div>
 
                 {/* Social Links */}
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {portfolio.socials?.github && (
-                    <a
-                      href={portfolio.socials.github}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-indigo-500/50 transition-colors"
-                    >
-                      <Github className="h-3.5 w-3.5" />
-                      GitHub
-                    </a>
-                  )}
-                  {portfolio.socials?.linkedin && (
-                    <a
-                      href={portfolio.socials.linkedin}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-indigo-500/50 transition-colors"
-                    >
-                      <Linkedin className="h-3.5 w-3.5 text-sky-500" />
-                      LinkedIn
-                    </a>
-                  )}
-                  {portfolio.socials?.website && (
-                    <a
-                      href={portfolio.socials.website}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-indigo-500/50 transition-colors"
-                    >
-                      <Globe className="h-3.5 w-3.5 text-emerald-500" />
-                      Website
-                    </a>
-                  )}
-                </div>
+                {(isSafeExternalUrl(portfolio.socials?.github) ||
+                  isSafeExternalUrl(portfolio.socials?.linkedin) ||
+                  isSafeExternalUrl(portfolio.socials?.website)) && (
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {isSafeExternalUrl(portfolio.socials?.github) && (
+                      <a
+                        href={portfolio.socials.github.trim()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-indigo-500/50 transition-colors"
+                      >
+                        <Github className="h-3.5 w-3.5" />
+                        GitHub
+                      </a>
+                    )}
+                    {isSafeExternalUrl(portfolio.socials?.linkedin) && (
+                      <a
+                        href={portfolio.socials.linkedin.trim()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-indigo-500/50 transition-colors"
+                      >
+                        <Linkedin className="h-3.5 w-3.5 text-sky-500" />
+                        LinkedIn
+                      </a>
+                    )}
+                    {isSafeExternalUrl(portfolio.socials?.website) && (
+                      <a
+                        href={portfolio.socials.website.trim()}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:border-indigo-500/50 transition-colors"
+                      >
+                        <Globe className="h-3.5 w-3.5 text-emerald-500" />
+                        Website
+                      </a>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 

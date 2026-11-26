@@ -54,6 +54,40 @@ function normalizeNotes(rawNotes) {
   });
 }
 
+const LEGACY_SAMPLE_SOCIAL_URLS = new Set([
+  'https://github.com/aarav-campusx',
+  'https://linkedin.com/in/aarav-campusx',
+  'https://campusx-portfolio.example.com',
+]);
+
+function normalizePortfolioData(rawPortfolio) {
+  if (!rawPortfolio || typeof rawPortfolio !== 'object') return rawPortfolio;
+  const socials = rawPortfolio.socials || {};
+  const cleanSocial = (val) => {
+    const trimmed = typeof val === 'string' ? val.trim() : '';
+    return LEGACY_SAMPLE_SOCIAL_URLS.has(trimmed) ? '' : trimmed;
+  };
+  const projects = Array.isArray(rawPortfolio.projects)
+    ? rawPortfolio.projects.map((proj) => {
+        const link = typeof proj?.link === 'string' ? proj.link.trim() : '';
+        if (link.startsWith('https://github.com/aarav-campusx/')) {
+          return { ...proj, link: '' };
+        }
+        return proj;
+      })
+    : rawPortfolio.projects;
+
+  return {
+    ...rawPortfolio,
+    socials: {
+      github: cleanSocial(socials.github),
+      linkedin: cleanSocial(socials.linkedin),
+      website: cleanSocial(socials.website),
+    },
+    projects,
+  };
+}
+
 function defaultStudyPlan() {
   return {
     subjects: DEFAULT_STUDY_SUBJECTS,
@@ -96,7 +130,7 @@ function loadUserWorkspaceData(authUser) {
     avatarUrl: authUser.photoURL || DEFAULT_PORTFOLIO.avatarUrl,
   };
 
-  let loadedPortfolio = readStorage(pKey, seededPortfolio);
+  let loadedPortfolio = normalizePortfolioData(readStorage(pKey, seededPortfolio));
   if (
     loadedPortfolio &&
     loadedPortfolio.name === DEFAULT_PORTFOLIO.name &&

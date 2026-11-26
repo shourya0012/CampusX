@@ -8,9 +8,9 @@ export const DEFAULT_PORTFOLIO = {
   email: 'aarav.sharma@campusx.edu',
   phone: '+91 98765 43210',
   socials: {
-    github: 'https://github.com/aarav-campusx',
-    linkedin: 'https://linkedin.com/in/aarav-campusx',
-    website: 'https://campusx-portfolio.example.com',
+    github: '',
+    linkedin: '',
+    website: '',
   },
   education: [
     {
@@ -52,17 +52,17 @@ export const DEFAULT_PORTFOLIO = {
       tag: 'Full-Stack + RAG',
       description:
         'An integrated student productivity platform combining a personal portfolio, Prompt Engineering quiz, live weather dashboard, OpenAI chatbot with temperature control, and a 7-stage PDF RAG assistant.',
-      tech: ['React', 'Tailwind CSS', 'FastAPI', 'ChromaDB', 'OpenAI'],
-      link: 'https://github.com/aarav-campusx/campusx',
+      tech: ['React', 'Tailwind CSS', 'FastAPI', 'ChromaDB', 'Gemini'],
+      link: '',
     },
     {
       id: 'proj-2',
       title: 'ExamPrep Vector Search',
       tag: 'NLP & Embeddings',
       description:
-        'Semantic search tool for university lecture slides using Sentence Transformers and cosine similarity to pinpoint exact slide paragraphs during exam revision.',
-      tech: ['Python', 'Sentence Transformers', 'PyPDF', 'FastAPI'],
-      link: 'https://github.com/aarav-campusx/examprep-search',
+        'Semantic search tool for university lecture slides using Gemini embeddings and cosine similarity to pinpoint exact slide paragraphs during exam revision.',
+      tech: ['Python', 'Gemini API', 'PyPDF', 'FastAPI'],
+      link: '',
     },
     {
       id: 'proj-3',
@@ -70,8 +70,8 @@ export const DEFAULT_PORTFOLIO = {
       tag: 'Prompt Engineering',
       description:
         'Lightweight benchmark utility comparing zero-shot, few-shot, and chain-of-thought prompt templates across varying temperature parameters.',
-      tech: ['JavaScript', 'OpenAI API', 'Vite'],
-      link: 'https://github.com/aarav-campusx/promptlab',
+      tech: ['JavaScript', 'Gemini API', 'Vite'],
+      link: '',
     },
   ],
 };
