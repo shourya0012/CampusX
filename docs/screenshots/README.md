@@ -1,12 +1,16 @@
-# CampusX Screenshot Checklist
+# CampusX Screenshot Index
 
-Capture and save the following screenshots into `docs/screenshots/` before submitting your project report or pushing to GitHub:
+All 12 UI screenshots embedded in [`README.md`](../../README.md#screenshots):
 
-1. `01-dashboard-dark.png` — Dashboard overview in Dark Navy mode showing KPI cards, module grid, and `API Connected` badge.
-2. `02-portfolio-light.png` — Personal Portfolio page in Light Mode demonstrating the working theme toggle and `Edit Profile` button.
-3. `03-quiz-results.png` — Prompt Engineering 5-question MCQ Quiz showing the final score card and green/red answer explanations.
-4. `04-study-planner-notes.png` — AI Study Planner generated multi-day schedule (and/or Smart Notes search & pinned notes).
-5. `05-weather-widget.png` — Weather Dashboard showing city search, temperature, humidity, wind speed, and error/setup handling.
-6. `06-ai-chatbot.png` — OpenAI Student Chatbot showing the temperature slider (`0.1`–`1.0`) and conversation bubbles.
-7. `07-rag-document-qa.png` — Document AI / RAG Studio showing an uploaded PDF, grounded answer, and ChromaDB retrieved source cards with page numbers.
-8. `08-rag-workflow-diagram.png` — RAG Workflow Diagram & 3 Real-World Business Use Cases tab.
+1. `dashboard.jpg` — Main Dashboard in Dark Mode with personalized greeting, KPI cards, and workspace modules.
+2. `ai-chatbot.png` — Gemini Student Chatbot with Temperature slider (`0.1`–`1.0`), starter prompts, and interactive study Q&A.
+3. `document-rag.png` — Document AI / RAG Assistant showing PDF upload dropzone, Top-K selector, indexed documents panel, and Workflow Diagram tab.
+4. `voice-study-assistant.png` — Voice Study Assistant with language selector, microphone recorder, editable transcript preview, and sample prompts.
+5. `portfolio.png` — AI Personal Portfolio displaying `Shourya Sharma`, custom `GitHub` profile link button, skills, and programming languages.
+6. `study-planner.png` — AI Study Planner showing subject deadline queue, daily hours slider, schedule generator, and Plan by Voice shortcut.
+7. `smart-notes.png` — Smart Notes workspace with creation form, search filter, category tags, and pinned study notes.
+8. `mcq-quiz.png` — Interactive Prompt Engineering & AI MCQ Quiz question card and progress bar.
+9. `weather-dashboard.png` — Live Weather Dashboard powered by WeatherAPI (`Jaipur`, `°C`/`°F` toggle, feels-like, humidity, wind speed, pressure).
+10. `login-light.png` — Firebase Authentication login screen in Light Mode (`Continue with Google`, Email/Password, Remember Me, Forgot Password).
+11. `login-dark.png` — Firebase Authentication login screen in Dark Mode.
+12. `settings-diagnostics.png` — Workspace Settings & Diagnostics showing Dark/Light switcher and live FastAPI, Firebase Auth, Gemini, and WeatherAPI status.

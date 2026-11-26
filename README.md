@@ -347,35 +347,73 @@ Defined with SPA rewrites in [`frontend/vercel.json`](frontend/vercel.json):
 
 ## Screenshots
 
-Captured UI screenshots of the deployed **CampusX: AI Student Hub** application (stored in [`docs/screenshots/`](docs/screenshots/README.md)):
+Captured UI screenshots of the deployed **CampusX: AI Student Hub** platform are stored in [`docs/screenshots/`](docs/screenshots/README.md).
 
-### Authentication (Light & Dark Mode)
-| Login (Light Mode) | Login (Dark Mode) |
-|---|---|
-| ![Login Light Mode](docs/screenshots/00-login-light.png) | ![Login Dark Mode](docs/screenshots/00-login-dark.png) |
+### Dashboard
 
-### Main Workspace & Overview
-| Dashboard | Workspace Settings & Diagnostics |
-|---|---|
-| ![CampusX Dashboard](docs/screenshots/01-dashboard.jpg) | ![Settings and Diagnostics](docs/screenshots/10-settings-diagnostics.png) |
+#### CampusX Main Dashboard (Dark Mode)
+![CampusX Dashboard](docs/screenshots/dashboard.jpg)
+*Centralized student workspace displaying KPI cards, quick-launch actions (Voice Study Assistant, Ask Your PDFs, Open AI Tutor), and module cards across Dark and Light themes.*
 
-### AI Assistant Modules
-| AI Chatbot (Gemini + Temperature Slider) | Document AI / RAG Assistant |
-|---|---|
-| ![Gemini Student Chatbot](docs/screenshots/08-ai-chatbot.png) | ![Document AI RAG Assistant](docs/screenshots/09-rag-document-ai.png) |
+---
 
-| Voice Study Assistant | AI Personal Portfolio (Custom GitHub Link) |
-|---|---|
-| ![Voice Study Assistant](docs/screenshots/02-voice-study-assistant.png) | ![AI Personal Portfolio](docs/screenshots/03-portfolio.png) |
+### AI Features
 
-### Productivity, Quiz & Live Weather
-| AI Study Planner | Smart Notes |
-|---|---|
-| ![AI Study Planner](docs/screenshots/06-study-planner.png) | ![Smart Notes](docs/screenshots/05-smart-notes.png) |
+#### AI Chatbot (Gemini + Temperature Slider)
+![CampusX AI Chatbot](docs/screenshots/ai-chatbot.png)
+*Multi-turn academic tutor powered by Google Gemini featuring starter study prompts, conversation controls, and an adjustable temperature slider (`0.1`–`1.0`).*
 
-| Prompt Engineering MCQ Quiz | Live Weather Dashboard (WeatherAPI) |
-|---|---|
-| ![MCQ Quiz](docs/screenshots/04-mcq-quiz.png) | ![Weather Dashboard](docs/screenshots/07-weather-dashboard.png) |
+#### Document AI / Retrieval-Augmented Generation (RAG)
+![CampusX Document AI RAG](docs/screenshots/document-rag.png)
+*PDF knowledge workspace supporting up to 15 MB PDF uploads, ChromaDB vector indexing with Gemini embeddings, Top-K retrieval configuration, and grounded Q&A with page citations.*
+
+#### Voice Study Assistant
+![CampusX Voice Study Assistant](docs/screenshots/voice-study-assistant.png)
+*Speech-to-schedule assistant supporting English and Hindi audio recording, editable transcript review, missing-requirement follow-up checks, and automated timetable and notes generation.*
+
+---
+
+### Portfolio
+
+#### AI Personal Portfolio & Custom Social Links
+![CampusX Personal Portfolio](docs/screenshots/portfolio.png)
+*Editable per-user student portfolio showcasing About Me, Technical Skills, Programming Languages, Education, Projects, and validated custom GitHub, LinkedIn, and Personal Website links.*
+
+---
+
+### Student Tools
+
+#### AI Study Planner
+![CampusX AI Study Planner](docs/screenshots/study-planner.png)
+*Deadline- and priority-weighted study planner generating daily `Study`, `Revision`, `Practice`, `Mock Test`, and `Final Revision` schedules synced with the Voice Study Assistant.*
+
+#### Smart Notes
+![CampusX Smart Notes](docs/screenshots/smart-notes.png)
+*Student note manager supporting instant creation, editing, keyword search, category filtering (`Prompt Eng`, `AI & RAG`, `Coding`, `Exam Prep`, `General`), and note pinning.*
+
+#### Prompt Engineering & AI MCQ Quiz
+![CampusX MCQ Quiz](docs/screenshots/mcq-quiz.png)
+*Interactive 5-question Prompt Engineering and RAG assessment with step-by-step progress tracking, Previous/Next navigation, score history, and detailed answer explanations.*
+
+#### Live Weather Dashboard
+![CampusX Weather Dashboard](docs/screenshots/weather-dashboard.png)
+*Real-time city weather search powered by backend-keyed WeatherAPI with quick-search city pills, `°C`/`°F` unit toggling, feels-like temperature, humidity, wind speed, and pressure.*
+
+---
+
+### Authentication & Workspace Settings
+
+#### Firebase Login Gate (Light Mode)
+![CampusX Login Light Mode](docs/screenshots/login-light.png)
+*Firebase authentication screen in Light Mode offering Google Sign-In (`Continue with Google`), Email/Password login, Remember Me persistence, Forgot Password reset, and account registration.*
+
+#### Firebase Login Gate (Dark Mode)
+![CampusX Login Dark Mode](docs/screenshots/login-dark.png)
+*Matching Dark Navy authentication screen ensuring consistent theming before entering the protected student workspace.*
+
+#### Workspace Settings & Backend Diagnostics
+![CampusX Settings and Diagnostics](docs/screenshots/settings-diagnostics.png)
+*Workspace preferences and live diagnostic panel verifying FastAPI health, Firebase Auth, Gemini, and WeatherAPI backend readiness alongside local storage reset controls.*
 
 ---
 
