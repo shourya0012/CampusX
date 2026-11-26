@@ -230,7 +230,7 @@ CampusX is structured so the **Frontend** and **FastAPI Backend** deploy as two 
    - **Build Command:** `npm run build`
    - **Output Directory:** `dist`
 3. Set Environment Variables on Vercel:
-   - `VITE_API_BASE_URL` — your live Render backend URL (e.g. `https://campusx-backend.onrender.com`, no trailing slash)
+   - `VITE_API_BASE_URL` — `https://campusx-w5tq.onrender.com` (no trailing slash)
    - `VITE_FIREBASE_API_KEY`
    - `VITE_FIREBASE_AUTH_DOMAIN`
    - `VITE_FIREBASE_PROJECT_ID`

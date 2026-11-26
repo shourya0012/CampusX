@@ -42,12 +42,15 @@ class Settings:
     FIREBASE_PROJECT_ID: str = os.getenv("FIREBASE_PROJECT_ID", "").strip()
 
     CORS_ORIGINS: list[str] = [
-        origin.strip()
+        origin.strip().rstrip("/")
         for origin in os.getenv(
             "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
         ).split(",")
         if origin.strip()
     ]
+    CORS_ORIGIN_REGEX: str = (
+        os.getenv("CORS_ORIGIN_REGEX", r"^https://[a-zA-Z0-9-]+\.vercel\.app$").strip()
+    )
 
     CHROMA_PERSIST_DIR: str = str(
         (BASE_DIR / os.getenv("CHROMA_PERSIST_DIR", "./chroma_db")).resolve()

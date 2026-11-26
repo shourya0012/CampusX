@@ -1,4 +1,8 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
+const DEFAULT_PRODUCTION_API_URL = 'https://campusx-w5tq.onrender.com';
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.PROD ? DEFAULT_PRODUCTION_API_URL : '')
+).replace(/\/$/, '');
 
 let getAuthToken = async () => null;
 
@@ -21,8 +25,9 @@ async function request(path, options = {}, { requireAuth = true } = {}) {
   try {
     response = await fetch(url, { ...options, headers });
   } catch {
+    const targetLabel = API_BASE_URL || 'http://127.0.0.1:8000';
     throw new Error(
-      'Unable to reach the CampusX Python backend. Make sure FastAPI is running on port 8000.'
+      `Unable to reach the CampusX backend API (${targetLabel}). If the Render service is waking up, please retry in a few seconds.`
     );
   }
 
