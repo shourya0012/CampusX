@@ -128,10 +128,42 @@ def run_tests() -> None:
             assert r_city.status_code == 200, r_city.text
             w = r_city.json()
             assert w["provider"] == "Open-Meteo"
+            assert w["cached"] is False
             print(
                 f"[PASS] /api/weather {w['city']}: {w['temperature_c']}°C, "
                 f"humidity={w['humidity']}%, wind={w['wind_speed_kmh']} km/h"
             )
+
+        # Repeated search must reuse 10-minute backend cache
+        r_cached = client.get("/api/weather?city=Jaipur")
+        assert r_cached.status_code == 200, r_cached.text
+        assert r_cached.json()["cached"] is True
+        print("[PASS] /api/weather Jaipur repeat request served from 10-minute cache")
+
+        # HTTP 429 cooldown + Retry-After + stale fallback test
+        from app.routes import weather as weather_mod
+        assert weather_mod._parse_retry_after("45") == 45
+        orig_until = weather_mod._rate_limited_until
+        orig_jaipur_entry = weather_mod._weather_cache.get("jaipur")
+        try:
+            weather_mod._rate_limited_until = weather_mod.time.monotonic() + 30
+            r_429 = client.get("/api/weather?city=UncachedRateLimitTestCity")
+            assert r_429.status_code == 429, r_429.text
+            assert int(r_429.headers.get("Retry-After", "0")) > 0
+            # Expired cache should still fall back gracefully during upstream 429
+            if orig_jaipur_entry:
+                weather_mod._weather_cache["jaipur"] = (
+                    weather_mod.time.monotonic() - weather_mod.WEATHER_CACHE_TTL_SECONDS - 10,
+                    orig_jaipur_entry[1],
+                )
+                r_stale = client.get("/api/weather?city=Jaipur")
+                assert r_stale.status_code == 200, r_stale.text
+                assert r_stale.json()["stale"] is True
+                print("[PASS] /api/weather 429 enforces Retry-After and falls back to stale cache")
+        finally:
+            weather_mod._rate_limited_until = orig_until
+            if orig_jaipur_entry:
+                weather_mod._weather_cache["jaipur"] = orig_jaipur_entry
 
         # Chat tests
         r_bad_temp = client.post(

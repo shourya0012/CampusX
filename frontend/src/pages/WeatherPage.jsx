@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Search,
   Droplets,
@@ -18,10 +18,64 @@ import {
   Loader2,
   Thermometer,
   ExternalLink,
+  Clock,
 } from 'lucide-react';
 import { fetchWeather } from '../services/api.js';
 
 const QUICK_CITIES = ['Jaipur', 'Bengaluru', 'Mumbai', 'London', 'Tokyo'];
+const CLIENT_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const SEARCH_DEBOUNCE_MS = 600;
+const WEATHER_SESSION_KEY = 'campusx_weather_cache_v1';
+
+function readClientCache() {
+  try {
+    const raw = sessionStorage.getItem(WEATHER_SESSION_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeClientCache(cacheObj) {
+  try {
+    sessionStorage.setItem(WEATHER_SESSION_KEY, JSON.stringify(cacheObj));
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+function getCachedCity(cityName) {
+  const key = (cityName || '').trim().toLowerCase();
+  if (!key) return null;
+  const cache = readClientCache();
+  const entry = cache[key];
+  if (!entry) return null;
+  if (Date.now() - entry.savedAt > CLIENT_CACHE_TTL_MS) {
+    return null;
+  }
+  return entry.data;
+}
+
+function saveCachedCity(cityName, data) {
+  const key = (cityName || '').trim().toLowerCase();
+  if (!key || !data) return;
+  const cache = readClientCache();
+  const now = Date.now();
+  cache[key] = { savedAt: now, data };
+  const resolvedKey = (data.city || '').trim().toLowerCase();
+  if (resolvedKey && resolvedKey !== key) {
+    cache[resolvedKey] = { savedAt: now, data };
+  }
+  cache.__lastCity = key;
+  writeClientCache(cache);
+}
+
+function getLastCachedWeather() {
+  const cache = readClientCache();
+  const lastKey = cache.__lastCity;
+  if (!lastKey) return null;
+  return getCachedCity(lastKey);
+}
 
 function WeatherConditionIcon({ iconKey }) {
   const iconProps = 'h-16 w-16';
@@ -52,41 +106,137 @@ function WeatherConditionIcon({ iconKey }) {
 }
 
 export default function WeatherPage() {
-  const [city, setCity] = useState('Bengaluru');
-  const [weather, setWeather] = useState(null);
+  const initialCached = getLastCachedWeather();
+  const [city, setCity] = useState(initialCached?.city || '');
+  const [weather, setWeather] = useState(initialCached);
   const [unit, setUnit] = useState('C');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [retrySeconds, setRetrySeconds] = useState(0);
 
-  const searchCity = useCallback(async (targetCity) => {
-    const query = (targetCity ?? '').trim();
+  const inFlightKeyRef = useRef('');
+  const requestSeqRef = useRef(0);
+  const debounceTimerRef = useRef(null);
+
+  useEffect(() => {
+    if (retrySeconds <= 0) return undefined;
+    const timer = setInterval(() => {
+      setRetrySeconds((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [retrySeconds]);
+
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
+
+  const searchCity = useCallback(async (targetCity, { fromDebounce = false } = {}) => {
+    const query = (targetCity ?? '').trim().replace(/\s+/g, ' ');
     if (!query) {
-      setError('Please enter a city name before searching.');
+      if (!fromDebounce) {
+        setError('Please enter a city name before searching.');
+      }
       return;
     }
 
-    setCity(query);
+    const queryKey = query.toLowerCase();
+
+    // Prevent duplicate concurrent requests for the same city
+    if (inFlightKeyRef.current === queryKey) {
+      return;
+    }
+
+    if (!fromDebounce) {
+      setCity(query);
+    }
+
+    // Serve fresh 10-minute client cache immediately with zero extra API calls
+    const localHit = getCachedCity(query);
+    if (localHit) {
+      setWeather({ ...localHit, cached: true });
+      setError('');
+      return;
+    }
+
+    const seq = ++requestSeqRef.current;
+    inFlightKeyRef.current = queryKey;
     setLoading(true);
     setError('');
 
     try {
       const data = await fetchWeather(query);
+      if (seq !== requestSeqRef.current) return;
+      saveCachedCity(query, data);
       setWeather(data);
+      setRetrySeconds(0);
     } catch (err) {
-      setError(err.message || 'Unable to fetch weather data.');
-      setWeather(null);
+      if (seq !== requestSeqRef.current) return;
+
+      if (err?.status === 429) {
+        const waitSec = err.retryAfterSeconds || 60;
+        setRetrySeconds(waitSec);
+        setError(
+          err.message ||
+            `Weather requests are temporarily rate-limited by Open-Meteo. Please wait ${waitSec} seconds and try again.`
+        );
+      } else if (err?.status >= 500 || err?.status === 504) {
+        setError(
+          err.message ||
+            'The Open-Meteo weather service is temporarily unavailable. Please try again in a moment.'
+        );
+      } else {
+        setError(err?.message || 'Unable to fetch weather data right now.');
+      }
+
+      // Preserve previously displayed weather if user had one, only clear on 404 city not found
+      if (err?.status === 404) {
+        setWeather(null);
+      }
     } finally {
-      setLoading(false);
+      if (inFlightKeyRef.current === queryKey) {
+        inFlightKeyRef.current = '';
+      }
+      if (seq === requestSeqRef.current) {
+        setLoading(false);
+      }
     }
   }, []);
 
-  useEffect(() => {
-    searchCity('Bengaluru');
-  }, [searchCity]);
+  const handleInputChange = (e) => {
+    const nextValue = e.target.value;
+    setCity(nextValue);
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    const trimmed = nextValue.trim();
+    if (trimmed.length < 3) {
+      return;
+    }
+
+    debounceTimerRef.current = setTimeout(() => {
+      searchCity(trimmed, { fromDebounce: true });
+    }, SEARCH_DEBOUNCE_MS);
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
     searchCity(city);
+  };
+
+  const handleQuickCity = (preset) => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+    searchCity(preset);
   };
 
   const formatTemp = (celsius) => {
@@ -137,18 +287,24 @@ export default function WeatherPage() {
             <input
               type="text"
               value={city}
-              onChange={(e) => setCity(e.target.value)}
+              onChange={handleInputChange}
               placeholder="Enter city name (e.g., Jaipur, Bengaluru, Mumbai)..."
               className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-navy-800 pl-10 pr-4 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || retrySeconds > 0}
             className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-60 text-white text-sm font-semibold shadow-md transition-all"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-            <span>{loading ? 'Searching...' : 'Get Weather'}</span>
+            <span>
+              {loading
+                ? 'Searching...'
+                : retrySeconds > 0
+                  ? `Wait ${retrySeconds}s`
+                  : 'Get Weather'}
+            </span>
           </button>
         </div>
 
@@ -158,8 +314,9 @@ export default function WeatherPage() {
             <button
               key={preset}
               type="button"
-              onClick={() => searchCity(preset)}
-              className="px-3 py-1 rounded-full text-xs font-medium bg-slate-100 dark:bg-navy-800 text-slate-600 dark:text-slate-300 hover:bg-indigo-500/15 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
+              disabled={loading}
+              onClick={() => handleQuickCity(preset)}
+              className="px-3 py-1 rounded-full text-xs font-medium bg-slate-100 dark:bg-navy-800 text-slate-600 dark:text-slate-300 hover:bg-indigo-500/15 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-60 transition-colors"
             >
               {preset}
             </button>
@@ -167,11 +324,35 @@ export default function WeatherPage() {
         </div>
       </form>
 
-      {/* Error State */}
+      {/* Error / Rate-Limit / Availability Banner */}
       {error && (
-        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 flex items-start gap-3 text-rose-600 dark:text-rose-400">
-          <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
-          <div className="text-sm font-medium">{error}</div>
+        <div
+          className={`rounded-2xl border p-4 flex items-start gap-3 ${
+            retrySeconds > 0
+              ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+              : 'border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400'
+          }`}
+        >
+          {retrySeconds > 0 ? (
+            <Clock className="h-5 w-5 shrink-0 mt-0.5" />
+          ) : (
+            <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+          )}
+          <div className="text-sm font-medium space-y-1">
+            <div>{error}</div>
+            {retrySeconds > 0 && (
+              <div className="text-xs opacity-90">
+                Retry available in {retrySeconds}s. Recent city searches are cached for 10 minutes.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Stale Cache Notice */}
+      {weather?.stale && weather?.notice && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs font-medium text-amber-700 dark:text-amber-300">
+          {weather.notice}
         </div>
       )}
 
@@ -188,7 +369,7 @@ export default function WeatherPage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
             <div>
               <div className="text-xs font-semibold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
-                Live Weather • {weather.provider || 'Open-Meteo'}
+                {weather.cached ? 'Cached Weather (10m)' : 'Live Weather'} • {weather.provider || 'Open-Meteo'}
               </div>
               <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white mt-1">
                 {weather.city}
@@ -274,8 +455,8 @@ export default function WeatherPage() {
             Search any city for live weather details
           </h4>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Enter a city above and click Get Weather to see temperature, relative humidity, wind
-            speed, and conditions.
+            Enter a city above or click a quick-search city to view temperature, relative humidity,
+            wind speed, and conditions.
           </p>
           <a
             href="https://open-meteo.com/"
