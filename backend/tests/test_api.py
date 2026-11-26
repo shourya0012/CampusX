@@ -116,6 +116,13 @@ def run_tests() -> None:
         assert r_me.json()["uid"] == "test-student-alpha"
         print("[PASS] /api/auth/me returns authenticated student identity")
 
+        from app.routes import weather as weather_mod
+        # Clear any disk/memory weather cache before deterministic multi-city/cooldown checks
+        weather_mod._disk_loaded = True
+        weather_mod._weather_cache.clear()
+        weather_mod._geo_cache.clear()
+        weather_mod._rate_limited_until = 0.0
+
         # Weather tests
         r_empty = client.get("/api/weather?city=   ")
         assert r_empty.status_code == 400, r_empty.text
@@ -123,7 +130,7 @@ def run_tests() -> None:
         assert r_missing.status_code == 404, r_missing.text
         print("[PASS] /api/weather empty city (400) & invalid city (404)")
 
-        for test_city in ("Jaipur", "Bengaluru", "Mumbai"):
+        for test_city in ("Jaipur", "Bengaluru", "Mumbai", "Delhi"):
             r_city = client.get(f"/api/weather?city={test_city}")
             assert r_city.status_code == 200, r_city.text
             w = r_city.json()
@@ -134,23 +141,77 @@ def run_tests() -> None:
                 f"humidity={w['humidity']}%, wind={w['wind_speed_kmh']} km/h"
             )
 
-        # Repeated search must reuse 10-minute backend cache
+        # Repeated search must reuse 10-minute backend cache across all cities/aliases
         r_cached = client.get("/api/weather?city=Jaipur")
         assert r_cached.status_code == 200, r_cached.text
         assert r_cached.json()["cached"] is True
-        print("[PASS] /api/weather Jaipur repeat request served from 10-minute cache")
+        r_alias = client.get("/api/weather?city=Bangalore")
+        assert r_alias.status_code == 200, r_alias.text
+        assert r_alias.json()["cached"] is True
+        print("[PASS] /api/weather repeat & alias searches served from 10-minute cache")
 
-        # HTTP 429 cooldown + Retry-After + stale fallback test
-        from app.routes import weather as weather_mod
+        # Duplicate concurrent requests deduplicate into a single upstream call
+        import asyncio as _asyncio
+        call_counter = {"count": 0}
+        orig_fetch = weather_mod._fetch_weather_from_open_meteo
+
+        async def _counted_fetch(clean_city: str, city_key: str):
+            call_counter["count"] += 1
+            await _asyncio.sleep(0.05)
+            return {
+                "city": clean_city,
+                "region": "",
+                "country": "IN",
+                "latitude": 18.52,
+                "longitude": 73.85,
+                "temperature_c": 24.0,
+                "feels_like_c": 24.5,
+                "humidity": 55,
+                "pressure_hpa": 1012,
+                "wind_speed_kmh": 8.0,
+                "wind_speed_ms": 2.2,
+                "weather_code": 1,
+                "condition": "Mainly Clear",
+                "description": "Mainly Clear",
+                "icon": "partly-cloudy-day",
+                "is_day": True,
+                "provider": "Open-Meteo",
+                "attribution_url": "https://open-meteo.com/",
+                "fetched_at": "2026-11-27T00:00:00+00:00",
+                "cached": False,
+                "stale": False,
+            }
+
+        async def _run_concurrent_dup():
+            return await _asyncio.gather(
+                weather_mod.get_weather(city="Pune", _current_user=user_alpha),
+                weather_mod.get_weather(city="Pune", _current_user=user_beta),
+            )
+
+        weather_mod._fetch_weather_from_open_meteo = _counted_fetch
+        try:
+            dup_results = _asyncio.run(_run_concurrent_dup())
+            assert call_counter["count"] == 1, f"Expected 1 call, got {call_counter['count']}"
+            assert len(dup_results) == 2
+            print("[PASS] /api/weather deduplicates concurrent duplicate requests into 1 upstream call")
+        finally:
+            weather_mod._fetch_weather_from_open_meteo = orig_fetch
+            weather_mod._weather_cache.pop("pune", None)
+
+        # Global HTTP 429 cooldown across cities + Retry-After + stale fallback + recovery
         assert weather_mod._parse_retry_after("45") == 45
         orig_until = weather_mod._rate_limited_until
         orig_jaipur_entry = weather_mod._weather_cache.get("jaipur")
         try:
             weather_mod._rate_limited_until = weather_mod.time.monotonic() + 30
-            r_429 = client.get("/api/weather?city=UncachedRateLimitTestCity")
-            assert r_429.status_code == 429, r_429.text
-            assert int(r_429.headers.get("Retry-After", "0")) > 0
-            # Expired cache should still fall back gracefully during upstream 429
+            # Any uncached city immediately returns 429 with matching Retry-After and ZERO upstream calls
+            r_429_a = client.get("/api/weather?city=UncachedRateLimitCityA")
+            r_429_b = client.get("/api/weather?city=UncachedRateLimitCityB")
+            assert r_429_a.status_code == 429 and r_429_b.status_code == 429
+            assert 1 <= int(r_429_a.headers.get("Retry-After", "0")) <= 30
+            assert 1 <= int(r_429_b.headers.get("Retry-After", "0")) <= 30
+
+            # Expired cache falls back cleanly during upstream 429
             if orig_jaipur_entry:
                 weather_mod._weather_cache["jaipur"] = (
                     weather_mod.time.monotonic() - weather_mod.WEATHER_CACHE_TTL_SECONDS - 10,
@@ -159,7 +220,14 @@ def run_tests() -> None:
                 r_stale = client.get("/api/weather?city=Jaipur")
                 assert r_stale.status_code == 200, r_stale.text
                 assert r_stale.json()["stale"] is True
-                print("[PASS] /api/weather 429 enforces Retry-After and falls back to stale cache")
+
+            # Recovery once cooldown expires
+            weather_mod._rate_limited_until = weather_mod.time.monotonic() - 1
+            weather_mod._weather_cache.pop("jaipur", None)
+            r_recovered = client.get("/api/weather?city=Jaipur")
+            assert r_recovered.status_code == 200, r_recovered.text
+            assert r_recovered.json()["stale"] is False
+            print("[PASS] /api/weather enforces global 429 cooldown, stale fallback, and recovers cleanly")
         finally:
             weather_mod._rate_limited_until = orig_until
             if orig_jaipur_entry:
