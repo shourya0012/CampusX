@@ -23,7 +23,7 @@ async def upload_pdf(
             detail="PDF file exceeds the 15 MB upload limit.",
         )
 
-    return rag_pipeline.ingest_pdf(content, file.filename, user_id=current_user.uid)
+    return await rag_pipeline.ingest_pdf(content, file.filename, user_id=current_user.uid)
 
 
 @router.get("/documents")

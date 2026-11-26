@@ -1,87 +1,53 @@
 from __future__ import annotations
 
-import gc
-import io
-import itertools
-import threading
-from typing import Optional
-
-import av
-import numpy as np
 from fastapi import HTTPException
-from faster_whisper import WhisperModel
+from google.genai import types as genai_types
 
-DEFAULT_WHISPER_MODEL = "base"
+from app.config import settings
+from app.services.gemini_service import generate_with_gemini
 
-
-def _decode_audio_to_float32(audio_bytes: bytes, sampling_rate: int = 16000) -> np.ndarray:
-    """Decode webm/ogg/wav/mp4 audio bytes to 16kHz mono float32 using PyAV."""
-    resampler = av.audio.resampler.AudioResampler(
-        format="s16",
-        layout="mono",
-        rate=sampling_rate,
-    )
-    raw_buffer = io.BytesIO()
-    dtype = np.int16
-
-    with av.open(io.BytesIO(audio_bytes), mode="r") as container:
-        audio_streams = [s for s in container.streams if s.type == "audio"]
-        if not audio_streams:
-            raise ValueError("Uploaded recording contains no audio stream.")
-
-        for frame in itertools.chain(container.decode(audio=0), [None]):
-            for resampled in resampler.resample(frame):
-                array = resampled.to_ndarray()
-                dtype = array.dtype
-                raw_buffer.write(array.tobytes())
-
-    del resampler
-    gc.collect()
-
-    raw_bytes = raw_buffer.getvalue()
-    if not raw_bytes:
-        return np.zeros(0, dtype=np.float32)
-    audio = np.frombuffer(raw_bytes, dtype=dtype)
-    return audio.astype(np.float32) / 32768.0
+_EXTENSION_MIME_MAP = {
+    ".webm": "audio/webm",
+    ".ogg": "audio/ogg",
+    ".oga": "audio/ogg",
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".mp4": "audio/mp4",
+    ".aac": "audio/aac",
+    ".flac": "audio/flac",
+}
 
 
-class LocalSpeechToTextService:
-    """Free, offline speech-to-text service powered by faster-whisper (CTranslate2)."""
+def _resolve_mime_type(filename: str, content_type: str | None) -> str:
+    ct = (content_type or "").split(";")[0].strip().lower()
+    if ct.startswith("audio/"):
+        return ct
+    if ct == "video/webm":
+        return "audio/webm"
+    lower_name = (filename or "").lower()
+    for ext, mime in _EXTENSION_MIME_MAP.items():
+        if lower_name.endswith(ext):
+            return mime
+    return "audio/webm"
 
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._model: Optional[WhisperModel] = None
 
-    def _get_model(self) -> WhisperModel:
-        if self._model is None:
-            with self._lock:
-                if self._model is None:
-                    try:
-                        self._model = WhisperModel(
-                            DEFAULT_WHISPER_MODEL,
-                            device="cpu",
-                            compute_type="int8",
-                            local_files_only=True,
-                        )
-                    except Exception:
-                        self._model = WhisperModel(
-                            DEFAULT_WHISPER_MODEL,
-                            device="cpu",
-                            compute_type="int8",
-                        )
-        return self._model
+def _normalize_language_label(language_hint: str) -> str:
+    hint = (language_hint or "").strip()
+    if not hint:
+        return "en-IN"
+    return hint
 
-    @staticmethod
-    def _normalize_language(language_hint: str) -> Optional[str]:
-        hint = (language_hint or "").strip().lower()
-        if hint.startswith("hi"):
-            return "hi"
-        if hint.startswith("en"):
-            return "en"
-        return None
 
-    def transcribe_bytes(
-        self, audio_bytes: bytes, filename: str, language_hint: str = "en-IN"
+class GeminiSpeechToTextService:
+    """Zero-local-RAM speech-to-text service powered by Gemini multimodal audio input."""
+
+    async def transcribe_bytes(
+        self,
+        audio_bytes: bytes,
+        filename: str,
+        language_hint: str = "en-IN",
+        content_type: str | None = None,
     ) -> dict[str, object]:
         if not audio_bytes or len(audio_bytes) < 100:
             raise HTTPException(
@@ -89,44 +55,51 @@ class LocalSpeechToTextService:
                 detail="Recorded audio was empty. Please speak into your microphone and try again.",
             )
 
-        try:
-            audio_array = _decode_audio_to_float32(audio_bytes)
-            if audio_array.size < 800:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Recorded audio was too short or silent. Please speak clearly and try again.",
-                )
-
-            model = self._get_model()
-            lang_code = self._normalize_language(language_hint)
-            segments, info = model.transcribe(
-                audio_array,
-                language=lang_code,
-                beam_size=5,
-                vad_filter=False,
-            )
-            text_parts = [seg.text.strip() for seg in segments if seg.text and seg.text.strip()]
-            transcript = " ".join(text_parts).strip()
-
-            if not transcript:
-                raise HTTPException(
-                    status_code=400,
-                    detail="No speech was detected in the recording. Please speak clearly or type below.",
-                )
-
-            return {
-                "transcript": transcript,
-                "language": getattr(info, "language", lang_code or "en"),
-                "duration_seconds": round(float(audio_array.size) / 16000.0, 2),
-                "engine": f"faster-whisper ({DEFAULT_WHISPER_MODEL})",
-            }
-        except HTTPException:
-            raise
-        except Exception as exc:
+        if not settings.GEMINI_API_KEY:
             raise HTTPException(
-                status_code=500,
-                detail=f"Audio transcription failed: {exc}",
+                status_code=503,
+                detail="GEMINI_API_KEY is not configured on the backend server for voice transcription.",
             )
 
+        mime_type = _resolve_mime_type(filename, content_type)
+        lang_label = _normalize_language_label(language_hint)
+        lang_instruction = (
+            "The speaker is likely speaking Hindi (Devanagari or Hinglish) or English."
+            if lang_label.lower().startswith("hi")
+            else "The speaker is likely speaking English (or Indian English / technical study terms)."
+        )
 
-stt_service = LocalSpeechToTextService()
+        prompt = (
+            f"Transcribe the attached student voice recording word for word. {lang_instruction} "
+            "Return ONLY the exact spoken transcript text with proper punctuation and no commentary. "
+            "If the audio is silent or contains no intelligible speech, return exactly [NO_SPEECH]."
+        )
+
+        transcript, used_model = await generate_with_gemini(
+            contents=[
+                genai_types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
+                prompt,
+            ],
+            system_instruction=(
+                "You are an accurate speech-to-text transcriber. Output only the spoken transcript."
+            ),
+            temperature=0.0,
+            max_output_tokens=1024,
+        )
+
+        cleaned = transcript.strip()
+        if not cleaned or "[NO_SPEECH]" in cleaned.upper():
+            raise HTTPException(
+                status_code=400,
+                detail="No speech was detected in the recording. Please speak clearly or type below.",
+            )
+
+        return {
+            "transcript": cleaned,
+            "language": lang_label,
+            "duration_seconds": None,
+            "engine": f"gemini ({used_model})",
+        }
+
+
+stt_service = GeminiSpeechToTextService()

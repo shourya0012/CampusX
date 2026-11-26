@@ -54,7 +54,9 @@ class Settings:
     )
     UPLOAD_DIR: str = str((BASE_DIR / os.getenv("UPLOAD_DIR", "./uploads")).resolve())
     EMBEDDING_MODEL: str = (
-        os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2").strip() or "all-MiniLM-L6-v2"
+        "gemini-embedding-001"
+        if os.getenv("EMBEDDING_MODEL", "gemini-embedding-001").strip() in ("", "all-MiniLM-L6-v2")
+        else os.getenv("EMBEDDING_MODEL", "gemini-embedding-001").strip()
     )
 
 

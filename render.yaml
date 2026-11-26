@@ -4,7 +4,7 @@ services:
     runtime: python
     rootDir: backend
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
       - key: GEMINI_API_KEY
         sync: false
@@ -15,6 +15,6 @@ services:
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: EMBEDDING_MODEL
-        value: all-MiniLM-L6-v2
+        value: gemini-embedding-001
       - key: CORS_ORIGINS
         value: https://your-campusx-frontend.vercel.app

@@ -4,13 +4,10 @@ import asyncio
 import json
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-import firebase_admin
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from firebase_admin import auth as firebase_auth
-from firebase_admin import credentials
 from google.auth import exceptions as google_auth_exceptions
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
@@ -20,7 +17,7 @@ from app.config import settings
 
 _bearer_scheme = HTTPBearer(auto_error=False)
 _init_lock = threading.Lock()
-_firebase_app: Optional[firebase_admin.App] = None
+_firebase_app: Optional[Any] = None
 _google_request: Optional[google_requests.Request] = None
 
 
@@ -47,10 +44,13 @@ def is_firebase_configured() -> bool:
     return False
 
 
-def _get_firebase_app() -> firebase_admin.App:
+def _get_firebase_app() -> Any:
     global _firebase_app
     if _firebase_app is not None:
         return _firebase_app
+
+    import firebase_admin
+    from firebase_admin import credentials
 
     with _init_lock:
         if _firebase_app is not None:
@@ -125,6 +125,8 @@ def _get_google_request() -> google_requests.Request:
 
 def _verify_token_sync(token: str) -> AuthenticatedUser:
     if _has_service_account_creds():
+        from firebase_admin import auth as firebase_auth
+
         app = _get_firebase_app()
         decoded = firebase_auth.verify_id_token(token, app=app)
     elif settings.FIREBASE_PROJECT_ID:
@@ -178,19 +180,7 @@ async def get_current_user(
         user = await asyncio.to_thread(_verify_token_sync, token)
     except HTTPException:
         raise
-    except firebase_auth.ExpiredIdTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Your login session has expired. Please sign in again.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except firebase_auth.RevokedIdTokenError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Your session has been revoked. Please sign in again.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    except (firebase_auth.InvalidIdTokenError, google_auth_exceptions.GoogleAuthError, ValueError) as exc:
+    except google_auth_exceptions.GoogleAuthError as exc:
         detail = "Invalid authentication token. Please sign in again."
         if "expired" in str(exc).lower():
             detail = "Your login session has expired. Please sign in again."
@@ -199,10 +189,18 @@ async def get_current_user(
             detail=detail,
             headers={"WWW-Authenticate": "Bearer"},
         )
-    except Exception:
+    except Exception as exc:
+        err_name = type(exc).__name__.lower()
+        msg_lower = str(exc).lower()
+        if "expired" in err_name or "expired" in msg_lower:
+            detail = "Your login session has expired. Please sign in again."
+        elif "revoked" in err_name or "revoked" in msg_lower:
+            detail = "Your session has been revoked. Please sign in again."
+        else:
+            detail = "Invalid authentication token. Please sign in again."
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unable to verify authentication token.",
+            detail=detail,
             headers={"WWW-Authenticate": "Bearer"},
         )
 

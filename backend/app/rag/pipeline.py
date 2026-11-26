@@ -8,54 +8,43 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
 
-import chromadb
 from fastapi import HTTPException
-from pypdf import PdfReader
-from sentence_transformers import SentenceTransformer
 
 from app.config import settings
-from app.services.gemini_service import generate_with_gemini
+from app.services.gemini_service import embed_texts_with_gemini, generate_with_gemini
 
-COLLECTION_NAME = "campusx_documents"
+COLLECTION_NAME = "campusx_documents_gemini"
 CHUNK_SIZE = 750
 CHUNK_OVERLAP = 150
 MIN_SIMILARITY_THRESHOLD = 0.18
 
 
 class RagPipeline:
-    """Seven-stage Retrieval-Augmented Generation pipeline using PyPDF, SentenceTransformers, ChromaDB, and OpenAI."""
+    """Seven-stage RAG pipeline using lazy PyPDF & ChromaDB plus Gemini API embeddings."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._embedder: Optional[SentenceTransformer] = None
-        self._chroma_client: Optional[chromadb.PersistentClient] = None
+        self._chroma_client = None
         self._collection = None
-
-        Path(settings.CHROMA_PERSIST_DIR).mkdir(parents=True, exist_ok=True)
-        Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
         self._registry_path = Path(settings.CHROMA_PERSIST_DIR) / "documents_registry.json"
 
-    def _get_embedder(self) -> SentenceTransformer:
-        if self._embedder is None:
-            with self._lock:
-                if self._embedder is None:
-                    try:
-                        self._embedder = SentenceTransformer(
-                            settings.EMBEDDING_MODEL, local_files_only=True
-                        )
-                    except Exception:
-                        self._embedder = SentenceTransformer(settings.EMBEDDING_MODEL)
-        return self._embedder
+    def _ensure_dirs(self) -> None:
+        Path(settings.CHROMA_PERSIST_DIR).mkdir(parents=True, exist_ok=True)
+        Path(settings.UPLOAD_DIR).mkdir(parents=True, exist_ok=True)
 
     def _get_collection(self):
         if self._collection is None:
             with self._lock:
                 if self._collection is None:
+                    self._ensure_dirs()
+                    import chromadb
+
                     self._chroma_client = chromadb.PersistentClient(
                         path=settings.CHROMA_PERSIST_DIR
                     )
                     self._collection = self._chroma_client.get_or_create_collection(
                         name=COLLECTION_NAME,
+                        embedding_function=None,
                         metadata={"hnsw:space": "cosine"},
                     )
         return self._collection
@@ -69,12 +58,15 @@ class RagPipeline:
             return []
 
     def _save_registry(self, items: list[dict[str, Any]]) -> None:
+        self._ensure_dirs()
         self._registry_path.write_text(json.dumps(items, indent=2), encoding="utf-8")
 
     # Stage 1: LOAD
     def load_pdf(self, pdf_bytes: bytes, filename: str) -> tuple[list[dict[str, Any]], int]:
         if not pdf_bytes:
             raise HTTPException(status_code=400, detail="Uploaded PDF file is empty.")
+
+        from pypdf import PdfReader
 
         try:
             reader = PdfReader(BytesIO(pdf_bytes))
@@ -163,7 +155,7 @@ class RagPipeline:
         return chunks
 
     # Stages 3 & 4: EMBED + STORE
-    def ingest_pdf(self, pdf_bytes: bytes, filename: str, user_id: str) -> dict[str, Any]:
+    async def ingest_pdf(self, pdf_bytes: bytes, filename: str, user_id: str) -> dict[str, Any]:
         safe_name = Path(filename).name
         if not safe_name.lower().endswith(".pdf"):
             raise HTTPException(
@@ -174,15 +166,10 @@ class RagPipeline:
         document_id = str(uuid.uuid4())[:12]
         chunks = self.chunk_pages(pages, document_id, safe_name, total_pages, user_id=user_id)
 
-        try:
-            embedder = self._get_embedder()
-            texts = [c["text"] for c in chunks]
-            embeddings = embedder.encode(texts, normalize_embeddings=True).tolist()
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Embedding generation failed ({settings.EMBEDDING_MODEL}): {exc}",
-            )
+        texts = [c["text"] for c in chunks]
+        embeddings, used_embed_model = await embed_texts_with_gemini(
+            texts, task_type="RETRIEVAL_DOCUMENT"
+        )
 
         try:
             collection = self._get_collection()
@@ -206,7 +193,7 @@ class RagPipeline:
             "pages_with_text": len(pages),
             "chunk_count": len(chunks),
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
-            "embedding_model": settings.EMBEDDING_MODEL,
+            "embedding_model": used_embed_model,
         }
 
         registry = self._load_registry()
@@ -240,7 +227,7 @@ class RagPipeline:
         return {"deleted": True, "document_id": document_id, "filename": target["filename"]}
 
     # Stage 5: RETRIEVE
-    def retrieve(
+    async def retrieve(
         self,
         question: str,
         user_id: str,
@@ -256,6 +243,11 @@ class RagPipeline:
                 raise HTTPException(
                     status_code=403,
                     detail="You do not have permission to query another student's document.",
+                )
+            if target.get("embedding_model") == "all-MiniLM-L6-v2":
+                raise HTTPException(
+                    status_code=400,
+                    detail="This PDF was indexed with an older local embedding model. Please re-upload it to query with Gemini embeddings.",
                 )
 
         user_docs = self.list_documents(user_id=user_id)
@@ -273,8 +265,10 @@ class RagPipeline:
                 detail="Vector store is empty. Upload a PDF document to index content.",
             )
 
-        embedder = self._get_embedder()
-        query_vector = embedder.encode([question], normalize_embeddings=True).tolist()
+        query_vectors, _ = await embed_texts_with_gemini(
+            [question], task_type="RETRIEVAL_QUERY"
+        )
+        query_vector = query_vectors
 
         user_chunks_total = sum(int(d.get("chunk_count", 0)) for d in user_docs)
         where_filter: dict[str, Any] = (
@@ -317,7 +311,7 @@ class RagPipeline:
         document_id: Optional[str] = None,
         top_k: int = 4,
     ) -> dict[str, Any]:
-        sources = self.retrieve(
+        sources = await self.retrieve(
             question=question, user_id=user_id, document_id=document_id, top_k=top_k
         )
 

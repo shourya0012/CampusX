@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 from fastapi import HTTPException
 from google import genai
@@ -13,6 +14,11 @@ FALLBACK_MODELS = [
     "gemini-3.8-flash",
     "gemini-3.7-flash",
     "gemini-4-hydrogen",
+]
+
+EMBEDDING_FALLBACK_MODELS = [
+    "gemini-embedding-001",
+    "gemini-embedding-2",
 ]
 
 
@@ -99,4 +105,90 @@ async def generate_with_gemini(
     raise HTTPException(
         status_code=502,
         detail="No configured Google Gemini model is currently available for this API key.",
+    )
+
+
+def _normalize_vector(vec: list[float]) -> list[float]:
+    norm = math.sqrt(sum(x * x for x in vec))
+    if norm <= 0.0:
+        return vec
+    return [x / norm for x in vec]
+
+
+async def embed_texts_with_gemini(
+    texts: list[str],
+    *,
+    task_type: str = "RETRIEVAL_DOCUMENT",
+    batch_size: int = 40,
+) -> tuple[list[list[float]], str]:
+    """Generate normalized text embeddings via Google Gemini API (zero local ML models)."""
+    if not settings.GEMINI_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="GEMINI_API_KEY is required on the backend to generate RAG embeddings.",
+        )
+    if not texts:
+        return [], settings.EMBEDDING_MODEL
+
+    client = genai.Client(api_key=settings.GEMINI_API_KEY)
+    candidates: list[str] = []
+    for m in [settings.EMBEDDING_MODEL, *EMBEDDING_FALLBACK_MODELS]:
+        if m and m not in candidates:
+            candidates.append(m)
+
+    config = genai_types.EmbedContentConfig(task_type=task_type)
+    last_api_error: genai_errors.APIError | None = None
+
+    for model_name in candidates:
+        try:
+            vectors: list[list[float]] = []
+            for start in range(0, len(texts), batch_size):
+                batch = texts[start : start + batch_size]
+                response = await client.aio.models.embed_content(
+                    model=model_name,
+                    contents=batch,
+                    config=config,
+                )
+                for emb in getattr(response, "embeddings", None) or []:
+                    vals = [float(v) for v in (getattr(emb, "values", None) or [])]
+                    vectors.append(_normalize_vector(vals))
+
+            if len(vectors) != len(texts):
+                raise HTTPException(
+                    status_code=502,
+                    detail="Gemini embedding API returned an incomplete set of vectors.",
+                )
+            return vectors, model_name
+        except HTTPException:
+            raise
+        except genai_errors.APIError as exc:
+            last_api_error = exc
+            code = getattr(exc, "code", None)
+            msg_lower = str(exc).lower()
+            if code in (401, 403) or "api key" in msg_lower or "permission" in msg_lower:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Google Gemini rejected the configured API key. Please verify GEMINI_API_KEY.",
+                )
+            if code in (404, 503, 429):
+                continue
+            raise HTTPException(
+                status_code=502,
+                detail="Google Gemini embedding service returned an upstream error.",
+            )
+        except Exception:
+            raise HTTPException(
+                status_code=502,
+                detail="Unable to reach Google Gemini embedding API.",
+            )
+
+    last_code = getattr(last_api_error, "code", None) if last_api_error else None
+    if last_code == 429:
+        raise HTTPException(
+            status_code=429,
+            detail="Google Gemini embedding quota exceeded. Please try again shortly.",
+        )
+    raise HTTPException(
+        status_code=502,
+        detail="No configured Gemini embedding model is currently available for this API key.",
     )

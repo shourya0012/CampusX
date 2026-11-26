@@ -12,14 +12,14 @@
   - Google Sign-In (`signInWithPopup` with account chooser), Email/Password sign-in, student registration, Forgot Password reset emails, `Remember Me` session persistence, and Sign Out.
   - Private frontend routes redirect unauthenticated users to `/login`; FastAPI verifies Firebase ID tokens on private `/api/*` endpoints and scopes `localStorage` and ChromaDB RAG documents per user UID.
 - **Voice Study Assistant (`Voice Study Assistant`)**:
-  - Record spoken study requirements (`MediaRecorder`) transcribed locally via **Faster-Whisper** (`backend/app/services/stt_service.py`) or edit/paste transcripts manually (English and Hindi supported).
+  - Record spoken study requirements (`MediaRecorder`) transcribed via **Google Gemini multimodal audio transcription** (`backend/app/services/stt_service.py`) or edit/paste transcripts manually (English and Hindi supported).
   - Extracts subject, exam date, syllabus chapters, weak topics, and daily study hours via **Google Gemini** (`google-genai`), prompts for any missing details, generates a complete daily study timetable + chapter-wise notes, and syncs them to **Study Planner** and **Smart Notes**.
 - **Gemini Student Chatbot (`AI Chatbot`)**:
   - Multi-turn AI tutor powered by **Google GenAI SDK (`google-genai`)** with starter prompts, conversation history, Clear Conversation, and a **Temperature Slider (`0.1` – `1.0`)**.
 - **7-Stage Document AI / RAG Assistant (`Document AI / RAG`)**:
   1. **Load**: Extract page-level text from uploaded PDFs with `pypdf`.
   2. **Chunk**: Split text into `750`-character chunks (`150`-char overlap) with page and `user_id` metadata.
-  3. **Embed**: Encode vectors with `SentenceTransformer("all-MiniLM-L6-v2")`.
+  3. **Embed**: Generate normalized embeddings via the **Google Gemini Embedding API** (`gemini-embedding-001`, zero local PyTorch/CUDA models).
   4. **Store**: Persist vectors and metadata in `ChromaDB` (`backend/chroma_db/`).
   5. **Retrieve**: Cosine similarity Top-K retrieval restricted to the authenticated user's uploaded PDFs.
   6. **Generate**: Grounded Gemini answer synthesis with page citations.
@@ -35,7 +35,7 @@
 - **Frontend**: React 18, Vite, JavaScript, Tailwind CSS, Lucide Icons, Firebase Web SDK (`firebase`)
 - **Backend**: Python, FastAPI, Uvicorn, Pydantic, HTTPX, Python-Multipart
 - **Authentication**: Firebase Authentication (Client SDK) + Google/Firebase ID token verification (`firebase-admin` / `google-auth`)
-- **AI, Speech & RAG**: Google GenAI Python SDK (`google-genai`), `faster-whisper`, PyAV (`av`), ChromaDB, Sentence Transformers (`all-MiniLM-L6-v2`), PyPDF
+- **AI, Speech & RAG**: Google GenAI Python SDK (`google-genai` for chat, `gemini-embedding-001` embeddings, and audio transcription), ChromaDB, PyPDF
 - **Weather Data**: Open-Meteo Geocoding & Forecast APIs
 - **Deployment Targets**: Separate deployment — **Vercel** (Frontend) + **Render** (Backend)
 
@@ -206,17 +206,18 @@ CampusX is structured so the **Frontend** and **FastAPI Backend** deploy as two 
 | Service | Root Directory | Install / Build Command | Start / Output |
 |---|---|---|---|
 | **Frontend (Vercel / Static Host)** | `frontend` | `npm install && npm run build` | Output directory: `dist` (SPA rewrites configured in [`frontend/vercel.json`](frontend/vercel.json)) |
-| **Backend (Render / Python Host)** | `backend` | `pip install -r requirements.txt` | `uvicorn app.main:app --host 0.0.0.0 --port $PORT` (configured in [`render.yaml`](render.yaml)) |
+| **Backend (Render / Python Host)** | `backend` | `pip install -r requirements.txt` | `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1` (configured in [`render.yaml`](render.yaml)) |
 
 ### Step 1: Deploy Backend on Render
 1. Create a **Web Service** on [Render](https://render.com) connected to your GitHub repository (or deploy with `render.yaml` Blueprint).
 2. Configure:
    - **Root Directory:** `backend`
    - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+   - **Start Command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1`
 3. Set Environment Variables on Render:
    - `GEMINI_API_KEY` — your Gemini API key
    - `GEMINI_MODEL` — `gemini-3.5-flash-lite`
+   - `EMBEDDING_MODEL` — `gemini-embedding-001`
    - `FIREBASE_PROJECT_ID` — your Firebase project ID
    - `FIREBASE_SERVICE_ACCOUNT_JSON` — *(optional)* minified Firebase service account JSON string
    - `CORS_ORIGINS` — your deployed frontend URL (e.g. `https://campusx.vercel.app`)
@@ -254,6 +255,6 @@ CampusX is structured so the **Frontend** and **FastAPI Backend** deploy as two 
 
 ## Known Limitations
 
-- **Voice STT & Embedding Models**: `faster-whisper` (`base`) and `all-MiniLM-L6-v2` download/run locally on the backend, which requires sufficient RAM/disk on your backend host tier.
+- **Gemini API Key Required**: AI Chatbot, RAG embeddings (`gemini-embedding-001`), RAG answer generation, and Voice Study audio transcription all use `GEMINI_API_KEY` on the backend.
 - **Ephemeral Free-Tier Disk**: Hosting providers with ephemeral filesystems (such as Render free tier) reset `chroma_db/` on redeploy unless a persistent disk is attached.
 - **Text-Based PDFs Only**: `pypdf` extracts selectable text layers; scanned image-only PDFs require OCR beforehand.

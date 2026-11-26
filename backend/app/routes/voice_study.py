@@ -39,11 +39,11 @@ async def transcribe_voice_audio(
         raise HTTPException(
             status_code=400, detail="Audio recording exceeds the 25 MB upload limit."
         )
-    return await asyncio.to_thread(
-        stt_service.transcribe_bytes,
+    return await stt_service.transcribe_bytes(
         audio_bytes,
         file.filename or "recording.webm",
         language,
+        content_type=file.content_type,
     )
 
 
