@@ -134,12 +134,12 @@ export default function SettingsPage({
               </span>
               <KeyRound
                 className={`h-4 w-4 ${
-                  isOnline ? 'text-emerald-500' : 'text-amber-500'
+                  integrations.weather_configured ? 'text-emerald-500' : 'text-amber-500'
                 }`}
               />
             </div>
             <div className="mt-2 text-sm font-bold text-slate-900 dark:text-white">
-              {isOnline ? 'Open-Meteo Ready' : 'Offline'}
+              {integrations.weather_configured ? 'WeatherAPI Ready' : 'Key Not Set'}
             </div>
           </div>
         </div>
@@ -149,10 +149,9 @@ export default function SettingsPage({
             Security Notice for API Keys
           </div>
           <p>
-            API keys are never stored in React or browser localStorage. Live weather via Open-Meteo
-            requires no API key; to enable live Google Gemini responses, copy{' '}
-            <code>backend/.env.example</code> to <code>backend/.env</code>, add{' '}
-            <code>GEMINI_API_KEY</code>, and restart the FastAPI server.
+            API keys are never stored in React or browser localStorage. Set{' '}
+            <code>GEMINI_API_KEY</code> and <code>WEATHERAPI_API_KEY</code> only in{' '}
+            <code>backend/.env</code> (or Render backend environment variables) and restart FastAPI.
           </p>
         </div>
       </section>

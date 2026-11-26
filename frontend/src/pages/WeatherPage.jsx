@@ -18,14 +18,13 @@ import {
   Loader2,
   Thermometer,
   ExternalLink,
-  Clock,
 } from 'lucide-react';
 import { fetchWeather } from '../services/api.js';
 
 const QUICK_CITIES = ['Jaipur', 'Bengaluru', 'Mumbai', 'Delhi', 'London', 'Tokyo'];
 const CLIENT_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const SEARCH_DEBOUNCE_MS = 900;
-const WEATHER_SESSION_KEY = 'campusx_weather_cache_v1';
+const SEARCH_DEBOUNCE_MS = 600;
+const WEATHER_SESSION_KEY = 'campusx_weatherapi_cache_v1';
 
 function readClientCache() {
   try {
@@ -112,37 +111,17 @@ export default function WeatherPage() {
   const [unit, setUnit] = useState('C');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [isRateLimited, setIsRateLimited] = useState(false);
-  const [retrySeconds, setRetrySeconds] = useState(0);
+  const [iconImgFailed, setIconImgFailed] = useState(false);
 
   const inFlightKeyRef = useRef('');
   const requestSeqRef = useRef(0);
   const debounceTimerRef = useRef(null);
   const weatherRef = useRef(weather);
-  const retrySecondsRef = useRef(retrySeconds);
 
   useEffect(() => {
     weatherRef.current = weather;
+    setIconImgFailed(false);
   }, [weather]);
-
-  useEffect(() => {
-    retrySecondsRef.current = retrySeconds;
-  }, [retrySeconds]);
-
-  useEffect(() => {
-    if (retrySeconds <= 0) return undefined;
-    const timer = setInterval(() => {
-      setRetrySeconds((prev) => {
-        if (prev <= 1) {
-          setIsRateLimited(false);
-          setError('');
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [retrySeconds]);
 
   useEffect(() => {
     return () => {
@@ -156,7 +135,6 @@ export default function WeatherPage() {
     const query = (targetCity ?? '').trim().replace(/\s+/g, ' ');
     if (!query) {
       if (!fromDebounce) {
-        setIsRateLimited(false);
         setError('Please enter a city name before searching.');
       }
       return;
@@ -164,20 +142,14 @@ export default function WeatherPage() {
 
     const queryKey = query.toLowerCase();
 
-    // Serve fresh 10-minute client cache immediately with zero API calls (even during rate-limit cooldown)
+    // Reuse 10-minute client cache to avoid duplicate API requests
     const localHit = getCachedCity(query);
     if (localHit) {
       if (!fromDebounce) {
         setCity(query);
       }
       setWeather({ ...localHit, cached: true });
-      setIsRateLimited(false);
       setError('');
-      return;
-    }
-
-    // Never send upstream calls while global Retry-After countdown is active
-    if (retrySecondsRef.current > 0) {
       return;
     }
 
@@ -202,7 +174,6 @@ export default function WeatherPage() {
     const seq = ++requestSeqRef.current;
     inFlightKeyRef.current = queryKey;
     setLoading(true);
-    setIsRateLimited(false);
     setError('');
 
     try {
@@ -210,24 +181,17 @@ export default function WeatherPage() {
       if (seq !== requestSeqRef.current) return;
       saveCachedCity(query, data);
       setWeather(data);
-      setIsRateLimited(false);
-      setRetrySeconds(0);
     } catch (err) {
       if (seq !== requestSeqRef.current) return;
 
       if (err?.status === 429) {
-        const waitSec = Math.max(1, err.retryAfterSeconds || 60);
-        setIsRateLimited(true);
-        setRetrySeconds(waitSec);
-        setError('');
+        setError(err.message || 'WeatherAPI quota exceeded. Please try again later.');
       } else if (err?.status >= 500 || err?.status === 504) {
-        setIsRateLimited(false);
         setError(
           err.message ||
-            'The Open-Meteo weather service is temporarily unavailable. Please try again in a moment.'
+            'Unable to fetch weather from WeatherAPI right now. Please try again in a moment.'
         );
       } else {
-        setIsRateLimited(false);
         setError(err?.message || 'Unable to fetch weather data right now.');
       }
 
@@ -253,7 +217,7 @@ export default function WeatherPage() {
     }
 
     const trimmed = nextValue.trim();
-    if (trimmed.length < 3 || retrySeconds > 0) {
+    if (trimmed.length < 3) {
       return;
     }
 
@@ -284,12 +248,6 @@ export default function WeatherPage() {
     return `${celsius}°C`;
   };
 
-  // Single synchronized message so banner countdown and button countdown always agree
-  const displayedError =
-    isRateLimited && retrySeconds > 0
-      ? `Weather service is temporarily rate-limited by Open-Meteo. Please wait ${retrySeconds}s and try again.`
-      : error;
-
   return (
     <div className="max-w-4xl space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -298,7 +256,7 @@ export default function WeatherPage() {
             Weather Dashboard
           </h2>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            Search real-time city weather, humidity, wind speed, and conditions powered by Open-Meteo.
+            Search real-time city weather, humidity, wind speed, and conditions powered by WeatherAPI.
           </p>
         </div>
 
@@ -338,17 +296,11 @@ export default function WeatherPage() {
           </div>
           <button
             type="submit"
-            disabled={loading || retrySeconds > 0}
+            disabled={loading}
             className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 disabled:opacity-60 text-white text-sm font-semibold shadow-md transition-all"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-            <span>
-              {loading
-                ? 'Searching...'
-                : retrySeconds > 0
-                  ? `Wait ${retrySeconds}s`
-                  : 'Get Weather'}
-            </span>
+            <span>{loading ? 'Searching...' : 'Get Weather'}</span>
           </button>
         </div>
 
@@ -358,7 +310,7 @@ export default function WeatherPage() {
             <button
               key={preset}
               type="button"
-              disabled={loading || (retrySeconds > 0 && !getCachedCity(preset))}
+              disabled={loading}
               onClick={() => handleQuickCity(preset)}
               className="px-3 py-1 rounded-full text-xs font-medium bg-slate-100 dark:bg-navy-800 text-slate-600 dark:text-slate-300 hover:bg-indigo-500/15 hover:text-indigo-600 dark:hover:text-indigo-400 disabled:opacity-60 transition-colors"
             >
@@ -368,28 +320,11 @@ export default function WeatherPage() {
         </div>
       </form>
 
-      {/* Error / Rate-Limit / Availability Banner */}
-      {displayedError && (
-        <div
-          className={`rounded-2xl border p-4 flex items-start gap-3 ${
-            isRateLimited && retrySeconds > 0
-              ? 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
-              : 'border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400'
-          }`}
-        >
-          {isRateLimited && retrySeconds > 0 ? (
-            <Clock className="h-5 w-5 shrink-0 mt-0.5" />
-          ) : (
-            <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
-          )}
-          <div className="text-sm font-medium space-y-1">
-            <div>{displayedError}</div>
-            {isRateLimited && retrySeconds > 0 && (
-              <div className="text-xs opacity-90">
-                Upstream requests are paused during cooldown ({retrySeconds}s remaining). Any previously cached cities remain available.
-              </div>
-            )}
-          </div>
+      {/* Error State */}
+      {error && (
+        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4 flex items-start gap-3 text-rose-600 dark:text-rose-400">
+          <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
+          <div className="text-sm font-medium">{error}</div>
         </div>
       )}
 
@@ -418,7 +353,7 @@ export default function WeatherPage() {
                   : weather.cached
                     ? 'Cached Weather (10m)'
                     : 'Live Weather'}{' '}
-                • {weather.provider || 'Open-Meteo'}
+                • {weather.provider || 'WeatherAPI'}
               </div>
               <h3 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white mt-1">
                 {weather.city}
@@ -426,13 +361,22 @@ export default function WeatherPage() {
                 {weather.country ? `, ${weather.country}` : ''}
               </h3>
               <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                {weather.condition} • {weather.description}
+                {weather.condition}
               </p>
             </div>
 
             <div className="flex items-center gap-4">
               <div className="h-20 w-20 rounded-2xl bg-indigo-500/10 flex items-center justify-center">
-                <WeatherConditionIcon iconKey={weather.icon} />
+                {weather.icon_url && !iconImgFailed ? (
+                  <img
+                    src={weather.icon_url}
+                    alt={weather.condition || 'Weather condition'}
+                    onError={() => setIconImgFailed(true)}
+                    className="h-16 w-16 object-contain"
+                  />
+                ) : (
+                  <WeatherConditionIcon iconKey={weather.icon} />
+                )}
               </div>
               <div className="text-4xl sm:text-5xl font-extrabold text-slate-900 dark:text-white">
                 {formatTemp(weather.temperature_c)}
@@ -487,12 +431,12 @@ export default function WeatherPage() {
               Coordinates: {weather.latitude}, {weather.longitude}
             </span>
             <a
-              href="https://open-meteo.com/"
+              href="https://www.weatherapi.com/"
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1 font-semibold text-indigo-600 dark:text-indigo-400 hover:underline"
             >
-              <span>Weather data by Open-Meteo</span>
+              <span>Powered by WeatherAPI</span>
               <ExternalLink className="h-3 w-3" />
             </a>
           </div>
@@ -508,12 +452,12 @@ export default function WeatherPage() {
             wind speed, and conditions.
           </p>
           <a
-            href="https://open-meteo.com/"
+            href="https://www.weatherapi.com/"
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 dark:text-indigo-400 hover:underline pt-1"
           >
-            <span>Powered by Open-Meteo</span>
+            <span>Powered by WeatherAPI</span>
             <ExternalLink className="h-3 w-3" />
           </a>
         </div>

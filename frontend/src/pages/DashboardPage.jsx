@@ -101,7 +101,7 @@ export default function DashboardPage({
 
   const backendReady = healthStatus?.status === 'ok';
   const geminiReady = healthStatus?.integrations?.gemini_configured;
-  const weatherReady = backendReady;
+  const weatherReady = healthStatus?.integrations?.weather_configured;
 
   return (
     <div className="space-y-6">
@@ -346,11 +346,11 @@ export default function DashboardPage({
                   : 'Set GEMINI_API_KEY in backend/.env to enable AI answers',
               },
               {
-                label: 'Live Weather Service (Open-Meteo)',
+                label: 'Live Weather Service (WeatherAPI)',
                 ready: weatherReady,
                 detail: weatherReady
-                  ? 'Active via Open-Meteo Geocoding & Forecast APIs (no key required)'
-                  : 'Start FastAPI backend to fetch live city forecasts',
+                  ? 'Configured via backend WeatherAPI integration'
+                  : 'Set WEATHERAPI_API_KEY in backend environment variables',
               },
             ].map((item) => (
               <div

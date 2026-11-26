@@ -34,6 +34,7 @@ class Settings:
 
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "").strip()
     GEMINI_MODEL: str = _resolve_gemini_model()
+    WEATHERAPI_API_KEY: str = os.getenv("WEATHERAPI_API_KEY", "").strip()
 
     FIREBASE_SERVICE_ACCOUNT_PATH: str = _resolve_optional_path(
         os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "")

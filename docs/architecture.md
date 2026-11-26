@@ -8,10 +8,10 @@ CampusX is a full-stack AI Student Hub built with **React + Vite + Tailwind CSS*
 flowchart LR
     User["Student Browser (React + Vite + Tailwind)"] -->|Local Storage| Local["Theme, Portfolio, Quiz, Study Plan, Notes"]
     User -->|"REST JSON /api/*"| FastAPI["FastAPI Backend (Python)"]
-    FastAPI -->|GET /api/weather| OM["Open-Meteo Geocoding & Forecast APIs"]
+    FastAPI -->|GET /api/weather| WA["WeatherAPI (api.weatherapi.com)"]
     FastAPI -->|POST /api/chat| GEM["Google Gemini API (google-genai SDK)"]
     FastAPI -->|POST /api/rag/upload| LoadChunk["PyPDF Load & Chunk"]
-    LoadChunk --> Embed["Sentence Transformers (all-MiniLM-L6-v2)"]
+    LoadChunk --> Embed["Gemini Embeddings (gemini-embedding-001)"]
     Embed --> Chroma["ChromaDB Persistent Vector Store"]
     FastAPI -->|POST /api/rag/query| Chroma
     Chroma -->|Top-K Chunks + Citations| GEM
@@ -35,13 +35,13 @@ flowchart LR
 
 ## Backend Architecture (`backend/app/`)
 
-- `config.py`: Loads environment variables from `backend/.env` (`GEMINI_API_KEY`, `GEMINI_MODEL`, `CORS_ORIGINS`, `CHROMA_PERSIST_DIR`, `EMBEDDING_MODEL`).
+- `config.py`: Loads environment variables from `backend/.env` (`GEMINI_API_KEY`, `GEMINI_MODEL`, `WEATHERAPI_API_KEY`, `CORS_ORIGINS`, `CHROMA_PERSIST_DIR`, `EMBEDDING_MODEL`).
 - `routes/health.py`: `GET /api/health` returning server status and boolean integration flags without exposing secrets.
-- `routes/weather.py`: `GET /api/weather?city=...` using Open-Meteo Geocoding and Forecast APIs (no API key required) with WMO weather-code mapping and error handling.
+- `routes/weather.py`: `GET /api/weather?city=...` using WeatherAPI (`api.weatherapi.com/v1/current.json`) with 10-minute caching, concurrent deduplication, and invalid-city/quota/network error handling.
 - `routes/chat.py`: `POST /api/chat` validating message history and forwarding `temperature` (`0.1`–`1.0`) to Google Gemini.
-- `rag/pipeline.py` & `routes/rag.py`: Implements all 7 RAG stages (`upload`, `documents`, `delete`, `query`) backed by `pypdf`, `sentence-transformers`, `chromadb`, and `google-genai`.
+- `rag/pipeline.py` & `routes/rag.py`: Implements all 7 RAG stages (`upload`, `documents`, `delete`, `query`) backed by `pypdf`, `chromadb`, and `google-genai`.
 
 ## Security & Secret Handling
 
-- Third-party API keys (`GEMINI_API_KEY`) stay strictly on the Python backend in `.env` (excluded via `.gitignore`).
+- Third-party API keys (`GEMINI_API_KEY`, `WEATHERAPI_API_KEY`) stay strictly on the Python backend in `.env` (excluded via `.gitignore`).
 - No secret keys are bundled into Vite/React or written to browser `localStorage`.

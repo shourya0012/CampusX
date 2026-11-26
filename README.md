@@ -1,8 +1,8 @@
 # CampusX — AI Student Hub
 
-**CampusX** is a full-stack, SaaS-style AI student productivity platform that unifies Firebase Authentication, a **Voice Study Assistant**, a Google Gemini AI study tutor, a per-user 7-stage PDF Retrieval-Augmented Generation (**RAG**) assistant, an Open-Meteo weather dashboard, a customizable student portfolio, an interactive prompt engineering MCQ quiz, an AI study planner, and smart notes.
+**CampusX** is a full-stack, SaaS-style AI student productivity platform that unifies Firebase Authentication, a **Voice Study Assistant**, a Google Gemini AI study tutor, a per-user 7-stage PDF Retrieval-Augmented Generation (**RAG**) assistant, a WeatherAPI live weather dashboard, a customizable student portfolio, an interactive prompt engineering MCQ quiz, an AI study planner, and smart notes.
 
-> **Security Architecture:** All private backend secrets (`GEMINI_API_KEY`, optional Firebase Service Account credentials) live strictly on the FastAPI backend. Private backend API routes require a verified Firebase ID token (`Authorization: Bearer <token>`), and uploaded PDFs, vector embeddings, and workspace state are isolated per authenticated student UID.
+> **Security Architecture:** All private backend secrets (`GEMINI_API_KEY`, `WEATHERAPI_API_KEY`, optional Firebase Service Account credentials) live strictly on the FastAPI backend. Private backend API routes require a verified Firebase ID token (`Authorization: Bearer <token>`), and uploaded PDFs, vector embeddings, and workspace state are isolated per authenticated student UID.
 
 ---
 
@@ -25,7 +25,7 @@
   6. **Generate**: Grounded Gemini answer synthesis with page citations.
   7. **Display**: Answer card + retrieved excerpts with similarity scores, plus an interactive **Workflow Diagram & Business Use Cases** tab.
 - **Live Weather Dashboard (`Weather`)**:
-  - Powered by **Open-Meteo** Geocoding & Forecast APIs (no weather API key required), with `°C` / `°F` toggle, humidity, wind speed, surface pressure, dynamic condition icons, invalid-city handling, and Open-Meteo attribution.
+  - Powered by **WeatherAPI** (`weatherapi.com`) via FastAPI with backend `WEATHERAPI_API_KEY`, 10-minute server caching & duplicate-request protection, `°C` / `°F` toggle, humidity, wind speed, surface pressure, dynamic condition icons, invalid-city/quota error handling, and WeatherAPI attribution.
 - **AI Personal Portfolio (`My Portfolio`)**, **Prompt Eng MCQ Quiz (`MCQ Quiz`)**, **AI Study Planner (`Study Planner`)**, **Smart Notes (`Smart Notes`)**, and **Dark / Light Mode**.
 
 ---
@@ -36,7 +36,7 @@
 - **Backend**: Python, FastAPI, Uvicorn, Pydantic, HTTPX, Python-Multipart
 - **Authentication**: Firebase Authentication (Client SDK) + Google/Firebase ID token verification (`firebase-admin` / `google-auth`)
 - **AI, Speech & RAG**: Google GenAI Python SDK (`google-genai` for chat, `gemini-embedding-001` embeddings, and audio transcription), ChromaDB, PyPDF
-- **Weather Data**: Open-Meteo Geocoding & Forecast APIs
+- **Weather Data**: WeatherAPI (`api.weatherapi.com/v1/current.json`)
 - **Deployment Targets**: Separate deployment — **Vercel** (Frontend) + **Render** (Backend)
 
 ---
@@ -149,6 +149,7 @@ Edit `backend/.env` and configure:
 ```env
 GEMINI_API_KEY=your_google_gemini_api_key_here
 GEMINI_MODEL=gemini-3.5-flash-lite
+WEATHERAPI_API_KEY=your_weatherapi_com_api_key_here
 FIREBASE_PROJECT_ID=your_firebase_project_id
 # Optional for token-revocation / full Admin SDK features:
 # FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json
@@ -217,6 +218,7 @@ CampusX is structured so the **Frontend** and **FastAPI Backend** deploy as two 
 3. Set Environment Variables on Render:
    - `GEMINI_API_KEY` — your Gemini API key
    - `GEMINI_MODEL` — `gemini-3.5-flash-lite`
+   - `WEATHERAPI_API_KEY` — your backend-only key from [weatherapi.com](https://www.weatherapi.com/)
    - `EMBEDDING_MODEL` — `gemini-embedding-001`
    - `FIREBASE_PROJECT_ID` — your Firebase project ID
    - `FIREBASE_SERVICE_ACCOUNT_JSON` — *(optional)* minified Firebase service account JSON string

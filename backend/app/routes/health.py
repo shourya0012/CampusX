@@ -15,8 +15,8 @@ async def health_check():
         "integrations": {
             "firebase_auth_configured": is_firebase_configured(),
             "gemini_configured": bool(settings.GEMINI_API_KEY),
-            "weather_configured": True,
-            "weather_provider": "Open-Meteo",
+            "weather_configured": bool(settings.WEATHERAPI_API_KEY),
+            "weather_provider": "WeatherAPI",
             "gemini_model": settings.GEMINI_MODEL,
             "embedding_model": settings.EMBEDDING_MODEL,
         },

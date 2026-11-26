@@ -37,23 +37,16 @@ async function request(path, options = {}, { requireAuth = true } = {}) {
     : await response.text();
 
   if (!response.ok) {
-    const retryAfterHeader = response.headers.get('Retry-After');
-    const retryAfterSeconds = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : NaN;
     let message =
       (typeof data === 'object' && (data.detail || data.message || data.error)) ||
       (typeof data === 'string' && data) ||
       `Request failed with status ${response.status}`;
-    if (response.status === 429 && !String(message).toLowerCase().includes('wait')) {
-      message = Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0
-        ? `Too many requests right now. Please wait ${retryAfterSeconds} seconds and try again.`
-        : 'Weather service is temporarily rate-limited. Please wait a moment and try again.';
+    if (response.status === 429 && !String(message).toLowerCase().includes('quota')) {
+      message = 'WeatherAPI request quota exceeded. Please try again later.';
     }
     const error = new Error(message);
     error.status = response.status;
     error.payload = data;
-    if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
-      error.retryAfterSeconds = retryAfterSeconds;
-    }
     throw error;
   }
 

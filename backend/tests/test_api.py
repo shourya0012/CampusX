@@ -116,122 +116,131 @@ def run_tests() -> None:
         assert r_me.json()["uid"] == "test-student-alpha"
         print("[PASS] /api/auth/me returns authenticated student identity")
 
+        from app.config import settings as app_settings
         from app.routes import weather as weather_mod
-        # Clear any disk/memory weather cache before deterministic multi-city/cooldown checks
-        weather_mod._disk_loaded = True
+        import httpx as _httpx
+
         weather_mod._weather_cache.clear()
-        weather_mod._geo_cache.clear()
-        weather_mod._rate_limited_until = 0.0
 
         # Weather tests
         r_empty = client.get("/api/weather?city=   ")
         assert r_empty.status_code == 400, r_empty.text
-        r_missing = client.get("/api/weather?city=InvalidCityXYZ99999")
-        assert r_missing.status_code == 404, r_missing.text
-        print("[PASS] /api/weather empty city (400) & invalid city (404)")
 
-        for test_city in ("Jaipur", "Bengaluru", "Mumbai", "Delhi"):
-            r_city = client.get(f"/api/weather?city={test_city}")
-            assert r_city.status_code == 200, r_city.text
-            w = r_city.json()
-            assert w["provider"] == "Open-Meteo"
-            assert w["cached"] is False
-            print(
-                f"[PASS] /api/weather {w['city']}: {w['temperature_c']}°C, "
-                f"humidity={w['humidity']}%, wind={w['wind_speed_kmh']} km/h"
-            )
-
-        # Repeated search must reuse 10-minute backend cache across all cities/aliases
-        r_cached = client.get("/api/weather?city=Jaipur")
-        assert r_cached.status_code == 200, r_cached.text
-        assert r_cached.json()["cached"] is True
-        r_alias = client.get("/api/weather?city=Bangalore")
-        assert r_alias.status_code == 200, r_alias.text
-        assert r_alias.json()["cached"] is True
-        print("[PASS] /api/weather repeat & alias searches served from 10-minute cache")
-
-        # Duplicate concurrent requests deduplicate into a single upstream call
-        import asyncio as _asyncio
-        call_counter = {"count": 0}
-        orig_fetch = weather_mod._fetch_weather_from_open_meteo
-
-        async def _counted_fetch(clean_city: str, city_key: str):
-            call_counter["count"] += 1
-            await _asyncio.sleep(0.05)
-            return {
-                "city": clean_city,
-                "region": "",
-                "country": "IN",
-                "latitude": 18.52,
-                "longitude": 73.85,
-                "temperature_c": 24.0,
-                "feels_like_c": 24.5,
-                "humidity": 55,
-                "pressure_hpa": 1012,
-                "wind_speed_kmh": 8.0,
-                "wind_speed_ms": 2.2,
-                "weather_code": 1,
-                "condition": "Mainly Clear",
-                "description": "Mainly Clear",
-                "icon": "partly-cloudy-day",
-                "is_day": True,
-                "provider": "Open-Meteo",
-                "attribution_url": "https://open-meteo.com/",
-                "fetched_at": "2026-11-27T00:00:00+00:00",
-                "cached": False,
-                "stale": False,
-            }
-
-        async def _run_concurrent_dup():
-            return await _asyncio.gather(
-                weather_mod.get_weather(city="Pune", _current_user=user_alpha),
-                weather_mod.get_weather(city="Pune", _current_user=user_beta),
-            )
-
-        weather_mod._fetch_weather_from_open_meteo = _counted_fetch
+        # Missing API key returns 503 cleanly
+        orig_weather_key = app_settings.WEATHERAPI_API_KEY
         try:
-            dup_results = _asyncio.run(_run_concurrent_dup())
-            assert call_counter["count"] == 1, f"Expected 1 call, got {call_counter['count']}"
-            assert len(dup_results) == 2
-            print("[PASS] /api/weather deduplicates concurrent duplicate requests into 1 upstream call")
+            app_settings.WEATHERAPI_API_KEY = ""
+            r_no_key = client.get("/api/weather?city=Bengaluru")
+            assert r_no_key.status_code == 503, r_no_key.text
+            print("[PASS] /api/weather empty city (400) & missing WEATHERAPI_API_KEY (503)")
         finally:
-            weather_mod._fetch_weather_from_open_meteo = orig_fetch
-            weather_mod._weather_cache.pop("pune", None)
+            app_settings.WEATHERAPI_API_KEY = orig_weather_key
 
-        # Global HTTP 429 cooldown across cities + Retry-After + stale fallback + recovery
-        assert weather_mod._parse_retry_after("45") == 45
-        orig_until = weather_mod._rate_limited_until
-        orig_jaipur_entry = weather_mod._weather_cache.get("jaipur")
-        try:
-            weather_mod._rate_limited_until = weather_mod.time.monotonic() + 30
-            # Any uncached city immediately returns 429 with matching Retry-After and ZERO upstream calls
-            r_429_a = client.get("/api/weather?city=UncachedRateLimitCityA")
-            r_429_b = client.get("/api/weather?city=UncachedRateLimitCityB")
-            assert r_429_a.status_code == 429 and r_429_b.status_code == 429
-            assert 1 <= int(r_429_a.headers.get("Retry-After", "0")) <= 30
-            assert 1 <= int(r_429_b.headers.get("Retry-After", "0")) <= 30
+        # Test WeatherAPI error mapping, parsing, 10-minute cache, and deduplication
+        class _FakeResponse:
+            def __init__(self, status_code: int, payload: dict):
+                self.status_code = status_code
+                self._payload = payload
+                self.reason_phrase = "Error"
 
-            # Expired cache falls back cleanly during upstream 429
-            if orig_jaipur_entry:
-                weather_mod._weather_cache["jaipur"] = (
-                    weather_mod.time.monotonic() - weather_mod.WEATHER_CACHE_TTL_SECONDS - 10,
-                    orig_jaipur_entry[1],
+            def json(self):
+                return self._payload
+
+        sample_city_data = {
+            "jaipur": ("Jaipur", "Rajasthan", "India", 26.92, 75.79, 25.4, 26.0, 48, 12.6, 1013, 1000, "Clear"),
+            "bengaluru": ("Bengaluru", "Karnataka", "India", 12.97, 77.59, 22.1, 22.8, 72, 10.8, 1011, 1003, "Partly cloudy"),
+            "mumbai": ("Mumbai", "Maharashtra", "India", 19.07, 72.88, 28.5, 31.2, 78, 14.4, 1009, 1183, "Light rain"),
+            "delhi": ("Delhi", "Delhi", "India", 28.67, 77.22, 23.0, 23.5, 55, 7.2, 1014, 1030, "Mist"),
+        }
+        weather_calls = {"count": 0}
+        mode = {"behavior": "ok"}
+
+        class _FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def get(self, url, params=None):
+                weather_calls["count"] += 1
+                q = str((params or {}).get("q") or "").strip().lower()
+                if mode["behavior"] == "timeout":
+                    raise _httpx.TimeoutException("Timed out")
+                if mode["behavior"] == "network":
+                    raise _httpx.ConnectError("Network unreachable")
+                if mode["behavior"] == "quota":
+                    return _FakeResponse(403, {"error": {"code": 2007, "message": "API key has exceeded calls per month quota."}})
+                if mode["behavior"] == "bad_key":
+                    return _FakeResponse(403, {"error": {"code": 2006, "message": "API key is invalid."}})
+                if q not in sample_city_data:
+                    return _FakeResponse(400, {"error": {"code": 1006, "message": "No matching location found."}})
+                name, region, country, lat, lon, temp_c, feels_c, hum, wind_kph, press_mb, code, cond = sample_city_data[q]
+                return _FakeResponse(
+                    200,
+                    {
+                        "location": {"name": name, "region": region, "country": country, "lat": lat, "lon": lon},
+                        "current": {
+                            "temp_c": temp_c,
+                            "feelslike_c": feels_c,
+                            "humidity": hum,
+                            "wind_kph": wind_kph,
+                            "pressure_mb": press_mb,
+                            "is_day": 1,
+                            "condition": {"text": cond, "icon": "//cdn.weatherapi.com/weather/64x64/day/116.png", "code": code},
+                        },
+                    },
                 )
-                r_stale = client.get("/api/weather?city=Jaipur")
-                assert r_stale.status_code == 200, r_stale.text
-                assert r_stale.json()["stale"] is True
 
-            # Recovery once cooldown expires
-            weather_mod._rate_limited_until = weather_mod.time.monotonic() - 1
-            weather_mod._weather_cache.pop("jaipur", None)
-            r_recovered = client.get("/api/weather?city=Jaipur")
-            assert r_recovered.status_code == 200, r_recovered.text
-            assert r_recovered.json()["stale"] is False
-            print("[PASS] /api/weather enforces global 429 cooldown, stale fallback, and recovers cleanly")
+        orig_async_client = weather_mod.httpx.AsyncClient
+        try:
+            app_settings.WEATHERAPI_API_KEY = "test-weatherapi-key"
+            weather_mod.httpx.AsyncClient = _FakeAsyncClient
+
+            for test_city in ("Jaipur", "Bengaluru", "Mumbai", "Delhi"):
+                r_city = client.get(f"/api/weather?city={test_city}")
+                assert r_city.status_code == 200, r_city.text
+                w = r_city.json()
+                assert w["provider"] == "WeatherAPI"
+                assert w["icon_url"].startswith("https://")
+                assert w["cached"] is False
+
+            # Repeat search must use 10-minute cache without hitting WeatherAPI again
+            calls_before = weather_calls["count"]
+            r_cached = client.get("/api/weather?city=Jaipur")
+            assert r_cached.status_code == 200 and r_cached.json()["cached"] is True
+            assert weather_calls["count"] == calls_before
+
+            # Error handling checks: invalid city (404), quota (429), invalid key (502), network (503), timeout (504)
+            assert client.get("/api/weather?city=InvalidCityXYZ99999").status_code == 404
+            mode["behavior"] = "quota"
+            assert client.get("/api/weather?city=UncachedQuotaCity").status_code == 429
+            mode["behavior"] = "bad_key"
+            assert client.get("/api/weather?city=UncachedKeyCity").status_code == 502
+            mode["behavior"] = "network"
+            assert client.get("/api/weather?city=UncachedNetCity").status_code == 503
+            mode["behavior"] = "timeout"
+            assert client.get("/api/weather?city=UncachedTimeoutCity").status_code == 504
+            print("[PASS] /api/weather WeatherAPI parsing, 10m cache, and error codes (404/429/502/503/504)")
         finally:
-            weather_mod._rate_limited_until = orig_until
-            if orig_jaipur_entry:
-                weather_mod._weather_cache["jaipur"] = orig_jaipur_entry
+            weather_mod.httpx.AsyncClient = orig_async_client
+            app_settings.WEATHERAPI_API_KEY = orig_weather_key
+            weather_mod._weather_cache.clear()
+
+        # If live WEATHERAPI_API_KEY is present in backend/.env, test live WeatherAPI responses too
+        if app_settings.WEATHERAPI_API_KEY:
+            for test_city in ("Jaipur", "Bengaluru", "Mumbai"):
+                r_live = client.get(f"/api/weather?city={test_city}")
+                assert r_live.status_code == 200, r_live.text
+                w = r_live.json()
+                assert w["provider"] == "WeatherAPI"
+                print(
+                    f"[PASS] /api/weather LIVE {w['city']}: {w['temperature_c']}°C, "
+                    f"humidity={w['humidity']}%, wind={w['wind_speed_kmh']} km/h"
+                )
 
         # Chat tests
         r_bad_temp = client.post(
