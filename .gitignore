@@ -1,0 +1,61 @@
+# Dependencies & package managers
+node_modules/
+frontend/node_modules/
+
+# Build outputs & bundler caches
+dist/
+build/
+frontend/dist/
+frontend/.vite/
+
+# Python environments & caches
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+backend/.venv/
+backend/venv/
+.pytest_cache/
+
+# Environment variables & API keys (never commit secrets)
+.env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.*
+firebase-service-account.json
+*service-account*.json
+*firebase-adminsdk*.json
+backend/firebase-*.json
+
+# Local ChromaDB vector store, databases & private uploaded/recorded files
+chroma_db/
+backend/chroma_db/
+uploads/
+backend/uploads/
+*.pdf
+*.sqlite
+*.sqlite3
+*.db
+*.webm
+*.wav
+*.mp3
+*.m4a
+
+# OS, IDE & logs
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
